@@ -15,7 +15,7 @@ library(foreach)
 
 
 # author: "Brooke", "Yilong"
-# date: [21 Sep, 2017] 
+# date: [21 Sep, 2017]
 
 
 setwd("/Users/yilongju/Dropbox/Study/RA/Rdrawing/VNSNY_UPENN_ABMS_Study")
@@ -34,7 +34,7 @@ proj4string(dat) <- proj4string(sodo)
 location = over(dat, sodo)
 data = cbind(data,location)
 
-summary(data) 
+summary(data)
 
 dataProjected <- sodo
 # add to data a new column termed "id" composed of the rownames of data
@@ -141,15 +141,15 @@ min(merge.shp.vars$ctrdlat)
 max(merge.shp.vars$ctrdlat)
 
 # # >>>>> New
-# test_plot <- ggplot() + 
-#   geom_polygon(data = merge.shp.vars, aes(long, lat, group = group, fill = propoa)) + 
+# test_plot <- ggplot() +
+#   geom_polygon(data = merge.shp.vars, aes(long, lat, group = group, fill = propoa)) +
 #   geom_polygon(data = boros_DF, aes(long, lat, group = group), fill = NA, color="black") +
-#   coord_equal(ratio = 1) + 
+#   coord_equal(ratio = 1) +
 #   scale_fill_distiller(labels = percent, name="Percent",
 #                        palette = "Reds", breaks = pretty_breaks(n = 4), direction = 1) +
 #   guides(fill = guide_legend(reverse = TRUE)) +
 #   labs(title = "Poverty Rate") +
-#   theme_nothing(legend=TRUE) + 
+#   theme_nothing(legend=TRUE) +
 #   geom_text(data = bnames, aes(long, lat, label = BoroName), size = 3, fontface = "bold") +
 #   geom_polygon(data = selected_merge.shp.vars, aes(long, lat, group = group), fill = NA, color = "blue") +
 #   geom_text(data = selected_merge.shp.vars, aes(ctrdlong, ctrdlat, label = BoroCT2000), size = 0.5) +
@@ -161,11 +161,11 @@ max(merge.shp.vars$ctrdlat)
 # # test_plot
 # ggsave(plot = test_plot, filename = "Propoa9.png",
 #        width=20, height=15, type='cairo-png', dpi = 1200)
-# 
-#   
+#
+#
 # # New <<<<<
-  
-  
+
+
 # ggplot(data = DF) +
 #   geom_polygon(aes(x=long, y=lat, group = group, fill = Pop.Dens)) +
 #   # geom_bar(data = DF, aes(x=long, y=lat, group = group, fill = Povrate.mean)) +
@@ -176,10 +176,10 @@ max(merge.shp.vars$ctrdlat)
 #   # scale_fill_distiller(labels=percent,name="Percent",
 #   #                      palette="Reds",breaks=pretty_breaks(n=4)) +
 #   guides(fill = guide_legend(reverse=TRUE)) +
-#   coord_equal() + 
+#   coord_equal() +
 #   theme_nothing(legend = TRUE)
 
-# 
+#
 # result_plot <- ggplot(DF) +
 #   geom_polygon(aes(x=long, y=lat, group = group, fill = varName)) +
 #   # geom_bar(data = DF, aes(x=long, y=lat, group = group, fill = Povrate.mean)) +
@@ -219,12 +219,12 @@ ui <- fluidPage(
                # Sidebar panel for inputs ----
                sidebarPanel(
                  #         > colnames(data_raw)
-                 #  [1] "ctuniq"      "boroCT2000"  "ctrdlong"    "ctrdlat"    
-                 #  [5] "popdens"     "povrate"     "unemp"       "busdens"    
-                 #  [9] "subdens"     "subacc"      "intdens"     "landind"    
-                 # [13] "nonres"      "resid"       "ptrans"      "pwalk"      
+                 #  [1] "ctuniq"      "boroCT2000"  "ctrdlong"    "ctrdlat"
+                 #  [5] "popdens"     "povrate"     "unemp"       "busdens"
+                 #  [9] "subdens"     "subacc"      "intdens"     "landind"
+                 # [13] "nonres"      "resid"       "ptrans"      "pwalk"
                  # [17] "propoa"      "propnonw"    "borocodenum"
-                 
+
                  # Input: Choose which variables to display ----
                  checkboxGroupInput(inputId = "displayVariables",
                                     label = h4("Select Variables"),
@@ -239,9 +239,9 @@ ui <- fluidPage(
                ),
                # Main panel for displaying outputs ----
                mainPanel(
-                 
+
                  # Output: Histogram ----
-                 
+
                  # fluidRow(column(3, verbatimTextOutput("selectedVars")))
                  plotOutput(outputId = "GIS", height = 800),
                  width = 8
@@ -251,10 +251,10 @@ ui <- fluidPage(
     tabPanel("Still Working", h3("This is the second panel"),
              # Sidebar layout with input and output definitions ----
              sidebarLayout(
-               
+
                # Sidebar panel for inputs ----
                sidebarPanel(
-                 
+
                  # Input: Slider for the number of bins ----
                  sliderInput(inputId = "bins",
                              label = "Number of bins:",
@@ -264,7 +264,7 @@ ui <- fluidPage(
                ),
                # Main panel for displaying outputs ----
                mainPanel(
-                 
+
                  # Output: Histogram ----
                  plotOutput(outputId = "distPlot")
                )
@@ -276,7 +276,7 @@ ui <- fluidPage(
 
 # Define server logic required to draw a histogram ----
 server <- function(input, output, session) {
-  
+
   # Histogram of the Old Faithful Geyser Data ----
   # with requested number of bins
   # This expression that generates a histogram is wrapped in a call
@@ -286,17 +286,17 @@ server <- function(input, output, session) {
   #    re-executed when inputs (input$bins) change
   # 2. Its output type is a plot
   output$distPlot <- renderPlot({
-    
+
     x    <- faithful$waiting
     bins <- seq(min(x), max(x), length.out = input$bins + 1)
     hist(x, breaks = bins, col = "#75AADB", border = "white",
          xlab = "Waiting time to next eruption (in mins)",
          main = "Histogram of waiting times")
-    
+
   })
-  
- 
-  
+
+
+
   # Set up a variable to control the drawing
   v <- reactiveValues(doPlot = FALSE)
   # Detect whether the button is clicked
@@ -307,26 +307,26 @@ server <- function(input, output, session) {
   # observeEvent(input$displayVariables, {
   #   v$doPlot <- FALSE
   # })
-  
+
   output$value <- renderPrint({ input$displayVariables })
   # output$selectedVars <- renderPrint({ colNames[input$displayVariables] })
   output$varLength <- renderPrint({ length(input$displayVariables) })
-  
+
   plotGIS <- reactive({
     # If the button is not clicked, do not draw
     if (v$doPlot == FALSE) {return()}
-    
+
     # Isolate the plot code, maintain the old plot until the button is clicked again
     isolate({
       var_len <- length(input$displayVariables)
       varNames <- input$displayVariables
       if (var_len == 1) {
         varName <- varNames[1]
-        t1 <- data %>% 
+        t1 <- data %>%
           group_by(Name) %>%
           summarise_(gmean = interp(~mean(var), var = as.name(varName)))
         DF <- dplyr::left_join(watershedDF, t1, by = "Name")
-        
+
         varIdx <- checkboxGroupListIndex[[varName]]
         varIdxR <- varIdx %% 3
         lowColors <- c("#132B43", "#2B4313", "#43132B")
@@ -348,7 +348,7 @@ server <- function(input, output, session) {
         # theme_minimal()
         return(result_plot)
       }
-      
+
       if (var_len > 1) {
         # Create a Progress object (for progess bar)
         progress <- shiny::Progress$new()
@@ -367,10 +367,10 @@ server <- function(input, output, session) {
         t2 <- data_necessary %>%
           group_by(Name) %>%
           summarise_all(funs(mean))
-        
+
         DF <- dplyr::left_join(watershedDF, t2, by = "Name")
         DF_nonmissing <- DF[complete.cases(DF[,(ncol(DF)-1):ncol(DF)]), ]
-        
+
         # Draw a blank map
         map_blankFrame <- ggplot(DF_nonmissing) +
           geom_polygon(aes(x=long, y=lat, group = group), fill = "white") +
@@ -380,37 +380,37 @@ server <- function(input, output, session) {
           coord_equal() +
           theme_minimal()
         map_blankFrame
-        
+
         # [12:30 PM, 20 Sep, 2017] [To be done] Produce atable with instinct location of centers.
-        DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE) 
+        DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE)
         region_num <- nrow(DF_forBarPlot)
         attr_num <- var_len
-        
+
         # Get centers for each region to display barplots
         # Get attributes
         DF_forBarPlot_attrs <- DF_forBarPlot[, (ncol(DF_forBarPlot) - (attr_num + 2)):ncol(DF_forBarPlot)]
         DF_forBarPlot_centers <- DF_forBarPlot_attrs[,-c(2:(ncol(DF_forBarPlot_attrs)-2))]
         DF_forBarPlot_attrs <- DF_forBarPlot_attrs[, 1:(ncol(DF_forBarPlot_attrs)-2)]
-        
+
         # Standardize data
         # DF_forBarPlot_attrs_mean <- colMeans(DF_forBarPlot_attrs[, -1], na.rm = TRUE)
         # DF_forBarPlot_attrs_sd <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, sd, na.rm = TRUE)
         # DF_forBarPlot_attrs_std <- (DF_forBarPlot_attrs[, 2:ncol(DF_forBarPlot_attrs)] - DF_forBarPlot_attrs_mean)/DF_forBarPlot_attrs_sd
-        
+
         # Minmax Standardize
         DF_forBarPlot_attrs_min <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, min, na.rm = TRUE)
         DF_forBarPlot_attrs_max <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, max, na.rm = TRUE)
         DF_forBarPlot_attrs_std <- (DF_forBarPlot_attrs[, 2:ncol(DF_forBarPlot_attrs)] - DF_forBarPlot_attrs_min)/(DF_forBarPlot_attrs_max - DF_forBarPlot_attrs_min)
-        
+
         # Melt data from plotting
         DF_forBarPlot_attrs_std <- cbind(DF_forBarPlot_attrs[1], DF_forBarPlot_attrs_std)
         melten_DF_attrs <- melt(DF_forBarPlot_attrs_std, id = "RegionID")
-        
+
         # Get a mini barplot list
         bar.testplot_list <- foreach(i = 1:region_num) %do% {
           gt_plot <- ggplotGrob(
             ggplot(melten_DF_attrs[which(melten_DF_attrs$RegionID == melten_DF_attrs$RegionID[i]),]) +
-              geom_bar(aes(factor(RegionID), value, group = variable), fill = rainbow(attr_num),      
+              geom_bar(aes(factor(RegionID), value, group = variable), fill = rainbow(attr_num),
                        position='dodge',stat='identity', color = "black") +
               labs(x = "", y = "") +
               theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
@@ -419,7 +419,7 @@ server <- function(input, output, session) {
           progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
           return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
         }
-        
+
         barplot_size <- 5e-3
         # print(bar.testplot_list)
 
@@ -439,15 +439,15 @@ server <- function(input, output, session) {
         return(result_plot)
       }
     })
-    
+
     # Make sure it closes when we exit this reactive, even if there's an error
-    
-    
+
+
   })
-  
+
   output$GIS <- renderPlot({plotGIS()})
-  
-  
+
+
 }
 
 shinyApp(ui = ui, server = server)
