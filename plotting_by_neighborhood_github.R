@@ -20,7 +20,7 @@ library(foreach)
 
 setwd("/Users/yilongju/Dropbox/Study/RA/Rdrawing/VNSNY_UPENN_ABMS_Study")
 data <- read.csv("ABM_censustract_file.csv")
-names(data)[2]<-"BoroCT2000"
+names(data)[2] <- "BoroCT2000"
 
 ct2000shp <- readOGR("nyct2000_12c/nyct2000_12c/nyct2000.shp")
 boros <- readOGR("nybb_16a/nybb.shp")
@@ -295,8 +295,7 @@ server <- function(input, output, session) {
     
   })
   
-  # Create a Progress object (for progess bar)
-  progress <- shiny::Progress$new()
+ 
   
   # Set up a variable to control the drawing
   v <- reactiveValues(doPlot = FALSE)
@@ -351,6 +350,9 @@ server <- function(input, output, session) {
       }
       
       if (var_len > 1) {
+        # Create a Progress object (for progess bar)
+        progress <- shiny::Progress$new()
+        # Initialize the progressbar
         progress$set(message = "Plotting...", value = 0)
         #var_len <- 2
         data_ids <- data[, "Name"]
@@ -405,31 +407,31 @@ server <- function(input, output, session) {
         melten_DF_attrs <- melt(DF_forBarPlot_attrs_std, id = "RegionID")
         
         # Get a mini barplot list
-        bar.testplot_list <- 
-          lapply(1:region_num, function(i) { 
-            gt_plot <- ggplotGrob(
-              ggplot(melten_DF_attrs[which(melten_DF_attrs$RegionID == melten_DF_attrs$RegionID[i]),]) +
-                geom_bar(aes(factor(RegionID), value, group = variable), fill = rainbow(attr_num),      
-                         position='dodge',stat='identity', color = "black") +
-                labs(x = "", y = "") +
-                theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
-            )
-            panel_coords <- gt_plot$layout[gt_plot$layout$name == "panel",]
-            progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
-            return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
-          })
+        bar.testplot_list <- foreach(i = 1:region_num) %do% {
+          gt_plot <- ggplotGrob(
+            ggplot(melten_DF_attrs[which(melten_DF_attrs$RegionID == melten_DF_attrs$RegionID[i]),]) +
+              geom_bar(aes(factor(RegionID), value, group = variable), fill = rainbow(attr_num),      
+                       position='dodge',stat='identity', color = "black") +
+              labs(x = "", y = "") +
+              theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
+          )
+          panel_coords <- gt_plot$layout[gt_plot$layout$name == "panel",]
+          progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
+          return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
+        }
         
         barplot_size <- 5e-3
-        
-        bar_annotation_list <- lapply(1:region_num, function(i) {
-          custom_annot <- annotation_custom(bar.testplot_list[[i]], 
+        # print(bar.testplot_list)
+
+        bar_annotation_list <- foreach(i = 1:region_num) %do% {
+          custom_annot <- annotation_custom(bar.testplot_list[[i]],
                             xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
                             xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size,
                             ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
                             ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size)
           progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Allocating plots ", i, " / ", region_num))
           return(custom_annot)
-        })
+        }
         result_plot <- Reduce(`+`, bar_annotation_list, map_blankFrame)
         progress$inc(floor(region_num/10)/(2*region_num + floor(region_num/10)), detail = "Showing plot.")
         # Remember to close the processbar object.
