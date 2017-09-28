@@ -10,6 +10,7 @@ library(maptools)
 library(rgeos)
 library(scales)
 library(RColorBrewer)
+library(foreach)
 
 
 
@@ -297,8 +298,6 @@ server <- function(input, output, session) {
   # Create a Progress object (for progess bar)
   progress <- shiny::Progress$new()
   
-  progress$set(message = "Plotting...", value = 0)
-  
   # Set up a variable to control the drawing
   v <- reactiveValues(doPlot = FALSE)
   # Detect whether the button is clicked
@@ -352,6 +351,7 @@ server <- function(input, output, session) {
       }
       
       if (var_len > 1) {
+        progress$set(message = "Plotting...", value = 0)
         #var_len <- 2
         data_ids <- data[, "Name"]
         #input$displayVariables <- c("popdens", "povrate")
@@ -415,25 +415,31 @@ server <- function(input, output, session) {
                 theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
             )
             panel_coords <- gt_plot$layout[gt_plot$layout$name == "panel",]
-            gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r]
+            progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
+            return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
           })
         
         barplot_size <- 5e-3
         
-        bar_annotation_list <- lapply(1:region_num, function(i) 
-          annotation_custom(bar.testplot_list[[i]], 
+        bar_annotation_list <- lapply(1:region_num, function(i) {
+          custom_annot <- annotation_custom(bar.testplot_list[[i]], 
                             xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
                             xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size,
                             ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
-                            ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size))
-        
+                            ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size)
+          progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Allocating plots ", i, " / ", region_num))
+          return(custom_annot)
+        })
         result_plot <- Reduce(`+`, bar_annotation_list, map_blankFrame)
+        progress$inc(floor(region_num/10)/(2*region_num + floor(region_num/10)), detail = "Showing plot.")
+        # Remember to close the processbar object.
+        on.exit(progress$close())
         return(result_plot)
       }
     })
     
     # Make sure it closes when we exit this reactive, even if there's an error
-    on.exit(progress$close())
+    
     
   })
   
