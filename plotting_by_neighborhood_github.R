@@ -103,7 +103,7 @@ test_plot
 varNames <- varDef$varName[5:nrow(varDef) - 1]
 varShortNames <- varDef$varShortName[5:nrow(varDef) - 1]
 varDefinitions <- varDef$varFullDefinition[5:nrow(varDef) - 1]
-checkboxGroupListIndex <- setNames(as.list(c(5:length(varNames))), varNames)
+checkboxGroupListIndex <- setNames(as.list(c(1:length(varNames))), varNames)
 checkboxGroupList <- setNames(as.list(varNames), varShortNames)
 
 ui <- fluidPage(
