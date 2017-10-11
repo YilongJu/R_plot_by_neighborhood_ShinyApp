@@ -12,26 +12,36 @@ library(scales)
 library(RColorBrewer)
 library(foreach)
 library(rsconnect)
+library(plotly)
+# packageVersion("plotly")
 
 
 # author: "Brooke", "Yilong"
 # date: [21 Sep, 2017]
+# Timezone: "US/Eastern" 
 
 # setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp/data")
 # data <- read.csv("ABM_censustract_file.csv")
+# names(data)[2] <- "BoroCT2000"
+# data <- data[order(data$BoroCT2000),]
 # varDef <- read.csv("Variable_Definitions.csv")
 # ct2000shp <- readOGR("nyct2000_12c/nyct2000_12c/nyct2000.shp")
 # boros <- readOGR("nybb_16a/nybb.shp")
 # ny.map <- readOGR("ZillowNeighborhoods-NY/ZillowNeighborhoods-NY.shp", layer="ZillowNeighborhoods-NY")
 
-
 data <- read.csv("data/ABM_censustract_file.csv")
 names(data)[2] <- "BoroCT2000"
 data <- data[order(data$BoroCT2000),]
 varDef <- read.csv("data/Variable_Definitions.csv")
-
 ct2000shp <- readOGR("data/nyct2000_12c/nyct2000_12c/nyct2000.shp")
 boros <- readOGR("data/nybb_16a/nybb.shp")
+
+# Covert real number vector to percentage vector
+NumToPercentage <- function(numVec) {
+  PercVec <- paste0(round(100 * numVec, 2), "%")
+  return(PercVec)
+}
+
 
 # Prepare ct shape data
 #   add to data a new column termed "id" composed of the rownames of data
@@ -47,6 +57,10 @@ t2 <- data %>%
     Pop.Dens = mean(popdens),
     Povrate.mean = mean(povrate),
   )
+
+t3 <- data %>%
+  group_by(BoroCT2000) %>%
+  summarise_all(funs(mean(., na.rm = TRUE)))
 
 ct2000shp_DF$BoroCT2000 <- as.character(ct2000shp_DF$BoroCT2000)
 t2$BoroCT2000 <- as.character(t2$BoroCT2000)
@@ -73,27 +87,61 @@ lowColors <- c("#132B43", "#2B4313", "#43132B")
 highColors <- c("#56B1F7", "#B1F756", "#F756B1")
 fill_area <- scale_fill_continuous(low = lowColors[varIdxR + 1], high = highColors[varIdxR+1], name = varName)
 
-center_DF <- merge.shp.vars %>% group_by(BoroCT2000) %>% summarise(clong = mean(long), clat = mean(lat))
-head(center_DF)
-head(merge.shp.vars)
-dim(center_DF)
+center_DF <- merge.shp.vars %>% group_by(BoroCT2000) %>% summarise(ctrdlong = mean(long), ctrdlat = mean(lat))
+# colnames(center_DF)[2:3] <- c("ctrdlong", ctrdlat)
 merge.shp.vars <- merge(merge.shp.vars, center_DF, by = "BoroCT2000")
-merge.shp.vars$ctrdlong <- merge.shp.vars$clong
-merge.shp.vars$ctrdlat <- merge.shp.vars$clat
-merge.shp.vars <- merge.shp.vars[, -ncol(merge.shp.vars)]
-merge.shp.vars <- merge.shp.vars[, -ncol(merge.shp.vars)]
+# merge.shp.vars$ctrdlong <- merge.shp.vars$clong
+# merge.shp.vars$ctrdlat <- merge.shp.vars$clat
+# merge.shp.vars <- merge.shp.vars[, -(ncol(merge.shp.vars)-2)]
+# merge.shp.vars <- merge.shp.vars[, -(ncol(merge.shp.vars)-2)]
+merge.shp.vars_forPlotly <- merge.shp.vars %>%
+  select(BoroCT2000, ctrdlong, ctrdlat, Povrate.mean, NTANAme) %>%
+  distinct(BoroCT2000, .keep_all = TRUE)
 # >>>>> New
 test_plot <- ggplot() +
   geom_polygon(data = merge.shp.vars, aes(long, lat, group = group, fill = Povrate.mean)) +
   geom_polygon(data = boros_DF, aes(long, lat, group = group), fill = NA, color="black") +
+  geom_point(data = merge.shp.vars_forPlotly, aes(ctrdlong, ctrdlat), size = 0.2, alpha = 0.15) +
   coord_equal(ratio = 1) +
   scale_fill_distiller(labels = percent, name="Percent",
                        palette = "Reds", breaks = pretty_breaks(n = 4), direction = 1) +
   guides(fill = guide_legend(reverse = TRUE)) +
-  labs(title = "Propoa") +
+  labs(title = "Mean Povrate") +
   geom_text(data = bnames, aes(long, lat, label = BoroName), size = 3, fontface = "bold") +
   theme_nothing(legend=TRUE)
-test_plot
+# test_plot
+test_plotly <- ggplotly(test_plot)
+test_plotly_build <- plotly_build(test_plotly)
+test_plotly_build$x$data[[2140]]$hovertext <- 
+  paste0("CT: ", merge.shp.vars_forPlotly$NTANAme,
+         "<br />Mean Povrate: ",
+         NumToPercentage(merge.shp.vars_forPlotly$Povrate.mean))
+test_plotly_build
+names(test_plotly_build$x$data[[1]])
+test_plotly_build$x$data[[1]]$type
+test_plotly_build$x$data[[3]]$text
+str(test_plotly_build$x$data[[4]])
+# CTname
+
+x <- c(0.1, 0.2, 0.042323)
+
+NumToPercentage(x)
+test_plotly_build$x$data[[2140]]
+head(test_plotly_build$x$data[[2140]]$hovertext)
+toy_hovertext <- head(test_plotly_build$x$data[[2140]]$hovertext)
+toy_msvfp <- head(merge.shp.vars_forPlotly)
+toy_hovertext <- paste0("CT: ", toy_msvfp$NTANAme, "<br />Mean Povrate: ", NumToPercentage(toy_msvfp$Povrate.mean))
+
+# Boroname 
+test_plotly_build$x$data[[2141]]
+length(test_plotly_build$x$data)
+
+
+# Sys.setenv("plotly_username"="yilongju")
+# Sys.setenv("plotly_api_key"="1g49fyKMWDSJcwC7afZ2")
+# chart_link = plotly_POST(test_plotly, filename="geom_polygon/test")
+chart_link = api_create(test_plotly, filename="geom_polygon/test2")
+chart_link
 # ggsave(plot = test_plot, filename = "Propoa10order.png",
 #        width=20, height=15, type='cairo-png', dpi = 1200) 
 # New <<<<<
@@ -272,8 +320,8 @@ server <- function(input, output, session) {
         DF <- left_join(DF, center_DF, by = "BoroCT2000")
         DF$ctrdlong <- DF$clong
         DF$ctrdlat <- DF$clat
-        DF <- DF[, -ncol(DF)]
-        DF <- DF[, -ncol(DF)]
+        DF <- DF[, -(ncol(DF)-2)]
+        DF <- DF[, -(ncol(DF)-2)]
         
         DF_nonmissing <- DF[complete.cases(DF[,(ncol(DF)-1):ncol(DF)]), ]
 
