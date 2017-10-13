@@ -68,5 +68,33 @@ p <- plotly_build(g)
 str(p)
 
 
+library(shiny)
+library(plotly)
+
+ui <- fluidPage(
+  plotlyOutput("plot"),
+  verbatimTextOutput("event")
+)
+
+server <- function(input, output) {
+  
+  # renderPlotly() also understands ggplot2 objects!
+  output$plot <- renderPlotly({
+    plot_ly(mtcars, x = ~mpg, y = ~wt)
+  })
+  
+  output$event <- renderPrint({
+    d <- event_data("plotly_hover")
+    if (is.null(d)) "Hover on a point!" else d
+  })
+}
+
+shinyApp(ui, server)
 
 
+
+setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp/PlotlyPlots2")
+browseLocalHTML <- function(x) browseURL(paste0('file://', file.path(getwd(), x)))
+OpenLocalHTML <- function(x) readLines(paste0('file://', file.path(getwd(), x)))
+t2 <- browseLocalHTML("nonres.html")
+t2 <- OpenLocalHTML("nonres.html")
