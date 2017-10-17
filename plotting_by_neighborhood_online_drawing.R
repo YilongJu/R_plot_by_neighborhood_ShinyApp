@@ -13,6 +13,7 @@ library(scales)
 library(RColorBrewer)
 library(rsconnect)
 library(plotly)
+library(doParallel)
 
 # author: "Brooke", "Yilong"
 # date: [21 Sep, 2017]
@@ -74,6 +75,29 @@ bnames$BoroName <- as.factor(bnames$BoroName)
 ct2000shp@data$id <- rownames(ct2000shp@data)
 f_ct2000shp <- fortify(ct2000shp , polyname = "BoroCT2000")
 ct2000shp_DF <- merge(f_ct2000shp, ct2000shp@data, by = "id")
+
+
+# [Prepare ny neighborhood shape data] ----
+#   project the dataframe onto the shape file
+#   add to data a new column termed "id" composed of the rownames of data
+#   create a data.frame from our spatial object
+#   merge the "fortified" data with the data from our spatial object
+ny.map <- readOGR("data/ZillowNeighborhoods-NY/ZillowNeighborhoods-NY.shp", layer="ZillowNeighborhoods-NY")
+sodo <- ny.map[ny.map$City == "New York", ]
+dat <- data.frame(Longitude = data$ctrdlong, Latitude = data$ctrdlat)
+coordinates(dat) <- ~ Longitude + Latitude
+proj4string(dat) <- proj4string(sodo)
+location = over(dat, sodo)
+data = cbind(data,location)
+dataProjected <- sodo
+dataProjected@data$id <- rownames(dataProjected@data)
+watershedPoints <- fortify(dataProjected, region = "id")
+watershedDF <- merge(watershedPoints, dataProjected@data, by = "id")
+
+
+
+
+
 
 # [Function for generating Plotly plot] ----
 #   Need to be declared after processing the data
@@ -235,6 +259,7 @@ ui <- fluidPage(
   )
 )
 
+
 # [Define server logic] ----
 server <- function(input, output, session) {
   
@@ -262,7 +287,7 @@ server <- function(input, output, session) {
   
   
   diplayVarDefinition <- reactive({
-    var_len <- length(input$displayVariables)
+    input_VarLen <- length(input$displayVariables)
     varNames <- input$displayVariables
   })
   
@@ -282,6 +307,116 @@ server <- function(input, output, session) {
         varIdx <- checkboxGroupListIndex[[varName]]
         result_plotly <- GetPlotlyPlot(varIdx)
         return(result_plotly)
+      } else if (input_VarLen > 1) {
+        # Create a Progress object (for progess bar)
+        progress <- shiny::Progress$new()
+        # Initialize the progressbar
+        progress$set(message = "Plotting...", value = 0)
+        # input_VarLen <- 2
+        data_ids <- data[, "Name"]
+        #input$displayVariables <- c("popdens", "povrate")
+        # data_vars <- data[, c("popdens", "povrate")]
+        data_vars <- data[, input$displayVariables]
+        #data_vars <- data[, c("popdens", "povrate")]
+        data_coords <- data[, c("ctrdlong", "ctrdlat")]
+        data_necessary <- cbind(Name = data_ids, data_vars, data_coords)
+        dim(data_necessary)
+        data_necessary_nonmissing <- data_necessary[complete.cases(data_necessary), ]
+        t2 <- data_necessary %>%
+          group_by(Name) %>%
+          summarise_all(funs(mean))
+        
+        DF <- dplyr::left_join(watershedDF, t2, by = "Name")
+        DF_nonmissing <- DF[complete.cases(DF[,(ncol(DF)-1):ncol(DF)]), ]
+        
+        # Draw a blank map
+        map_blankFrame <- ggplot(DF_nonmissing) +
+          geom_polygon(aes(x=long, y=lat, group = group), fill = "white") +
+          geom_path(aes(x=long, y=lat, group = group), color = "black", size = 0.2) +
+          geom_point(aes(x=ctrdlong, y=ctrdlat), size = 0.2) +
+          # geom_bar(data = DF, aes(x=long, y=lat, group = group, fill = Povrate.mean)) +
+          coord_equal() +
+          theme_minimal()
+        map_blankFrame
+        
+        # [12:30 PM, 20 Sep, 2017] [To be done] Produce atable with instinct location of centers.
+        DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE)
+        region_num <- nrow(DF_forBarPlot)
+        attr_num <- input_VarLen
+        
+        # Get centers for each region to display barplots
+        # Get attributes
+        DF_forBarPlot_attrs <- DF_forBarPlot[, (ncol(DF_forBarPlot) - (attr_num + 2)):ncol(DF_forBarPlot)]
+        DF_forBarPlot_centers <- DF_forBarPlot_attrs[,-c(2:(ncol(DF_forBarPlot_attrs)-2))]
+        DF_forBarPlot_attrs <- DF_forBarPlot_attrs[, 1:(ncol(DF_forBarPlot_attrs)-2)]
+        
+        # Standardize data
+        # DF_forBarPlot_attrs_mean <- colMeans(DF_forBarPlot_attrs[, -1], na.rm = TRUE)
+        # DF_forBarPlot_attrs_sd <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, sd, na.rm = TRUE)
+        # DF_forBarPlot_attrs_std <- (DF_forBarPlot_attrs[, 2:ncol(DF_forBarPlot_attrs)] - DF_forBarPlot_attrs_mean)/DF_forBarPlot_attrs_sd
+        
+        # Minmax Standardize
+        DF_forBarPlot_attrs_min <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, min, na.rm = TRUE)
+        DF_forBarPlot_attrs_max <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, max, na.rm = TRUE)
+        DF_forBarPlot_attrs_std <- sapply(c(1:2), function(i) {
+          (DF_forBarPlot_attrs[, i + 1] - DF_forBarPlot_attrs_min[i]) /
+            (DF_forBarPlot_attrs_max[i] - DF_forBarPlot_attrs_min)[i]
+        })
+        
+        # Melt data from plotting
+        DF_forBarPlot_attrs_std <- cbind(DF_forBarPlot_attrs[1], DF_forBarPlot_attrs_std)
+        melten_DF_attrs <- melt(DF_forBarPlot_attrs_std, id = "RegionID")
+        
+        # Summary all packages needed by children threads
+        packages <- c("rgdal", "tidyverse", "shiny", "lazyeval",
+                      "reshape2", "scales", "ggmap", "Cairo",
+                      "maptools", "rgeos", "scales", "RColorBrewer",
+                      "rsconnect", "plotly", "doParallel")
+        
+        # Register threads
+        cl <- makeCluster(8)
+        registerDoParallel(cl)
+        
+        lowColors <- c("#132B43", "#2B4313", "#43132B")
+        highColors <- c("#56B1F7", "#B1F756", "#F756B1")
+        
+        
+        # Get a mini barplot list
+        bar.testplot_list <- foreach(i = 1:region_num,
+                                     .packages = packages) %dopar% {
+          gt_plot <- ggplotGrob(
+            ggplot(melten_DF_attrs[which(melten_DF_attrs$RegionID ==
+                                           melten_DF_attrs$RegionID[i]),]) +
+              geom_bar(aes(factor(RegionID), value, group = variable),
+                       fill = c(lowColors[1], highColors[1]),
+                       position='dodge',stat='identity', color = "black") +
+              labs(x = "", y = "") +
+              theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
+          )
+          panel_coords <- gt_plot$layout[gt_plot$layout$name == "panel",]
+          # progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
+          return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
+        }
+        
+        barplot_size <- 5e-3
+        # Annotate mini barplots on their location
+        bar_annotation_list <- foreach(i = 1:region_num,
+                                       .packages = packages) %dopar% {
+          custom_annot <- 
+            annotation_custom(bar.testplot_list[[i]],
+                              xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
+                              xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size,
+                              ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
+                              ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size)
+          # progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Allocating plots ", i, " / ", region_num))
+          return(custom_annot)
+        }
+        result_plot <- Reduce(`+`, bar_annotation_list, map_blankFrame)
+        progress$inc(floor(region_num/10)/(2*region_num + floor(region_num/10)), detail = "Showing plot.")
+        # Remember to close the processbar object.
+        on.exit(progress$close())
+        result_plotly <- ggplotly(result_plot)
+        return(result_plot)
       } else {
         return(plotly_empty())
       }
@@ -294,7 +429,7 @@ server <- function(input, output, session) {
       #   progress$set(message = "Plotting...", value = 0)
       #   data_ids <- data[, "BoroCT2000"]
       #   data_ids <- as.character(data_ids)
-      #   # var_len <- 2
+      #   # input_VarLen <- 2
       #   data_vars <- data[, input$displayVariables]
       #   # data_vars <- data[, c("popdens", "povrate")]
       #   data_coords <- data[, c("ctrdlong", "ctrdlat")]
@@ -328,7 +463,7 @@ server <- function(input, output, session) {
       #   
       #   DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE)
       #   region_num <- nrow(DF_forBarPlot)
-      #   attr_num <- var_len
+      #   attr_num <- input_VarLen
       #   
       #   # Get centers for each region to display barplots
       #   # Get attributes
