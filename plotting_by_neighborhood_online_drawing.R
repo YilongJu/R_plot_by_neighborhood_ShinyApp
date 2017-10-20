@@ -13,6 +13,7 @@ library(scales)
 library(RColorBrewer)
 library(rsconnect)
 library(plotly)
+library(crosstalk)
 library(doParallel)
 
 # author: "Brooke", "Yilong"
@@ -35,7 +36,7 @@ data <- data[-1973, ]
 varDef <- read.csv("data/Variable_Definitions.csv")
 ct2000shp <- readOGR("data/nyct2000_12c/nyct2000_12c/nyct2000.shp")
 boros <- readOGR("data/nybb_16a/nybb.shp")
-
+ny.map <- readOGR("data/ZillowNeighborhoods-NY/ZillowNeighborhoods-NY.shp", layer="ZillowNeighborhoods-NY")
 
 # [Desciption of attributes] ----
 beginRow <- 6
@@ -82,7 +83,7 @@ ct2000shp_DF <- merge(f_ct2000shp, ct2000shp@data, by = "id")
 #   add to data a new column termed "id" composed of the rownames of data
 #   create a data.frame from our spatial object
 #   merge the "fortified" data with the data from our spatial object
-ny.map <- readOGR("data/ZillowNeighborhoods-NY/ZillowNeighborhoods-NY.shp", layer="ZillowNeighborhoods-NY")
+
 sodo <- ny.map[ny.map$City == "New York", ]
 dat <- data.frame(Longitude = data$ctrdlong, Latitude = data$ctrdlat)
 coordinates(dat) <- ~ Longitude + Latitude
@@ -196,6 +197,8 @@ GetPlotlyPlot <- function(varIdx) {
   # [Return Plotly plot] ----
   return(result_plotly_build)
 }
+
+# [Make a test plotly plot] ----
 
 
 # [Define server ui] ----
@@ -312,12 +315,11 @@ server <- function(input, output, session) {
         progress <- shiny::Progress$new()
         # Initialize the progressbar
         progress$set(message = "Plotting...", value = 0)
-        # input_VarLen <- 2
-        data_ids <- data[, "Name"]
-        #input$displayVariables <- c("popdens", "povrate")
-        # data_vars <- data[, c("popdens", "povrate")]
+
         data_vars <- data[, input$displayVariables]
-        #data_vars <- data[, c("popdens", "povrate")]
+        data_ids <- data[, "Name"]
+        # data_vars <- data[, c("popdens", "povrate")]
+        # input_VarLen <- 2
         data_coords <- data[, c("ctrdlong", "ctrdlat")]
         data_necessary <- cbind(Name = data_ids, data_vars, data_coords)
         dim(data_necessary)
@@ -338,6 +340,36 @@ server <- function(input, output, session) {
           coord_equal() +
           theme_minimal()
         map_blankFrame
+        map_blankFrame_plotly <- ggplotly(map_blankFrame, tooltip = "group")
+        map_blankFrame_plotly
+        highlight(map_blankFrame_plotly, persistent = TRUE, dynamic = TRUE)
+        # supply custom colors to the brush 
+        cols <- toRGB(RColorBrewer::brewer.pal(3, "Dark2"), 0.5)
+        highlight(
+          map_blankFrame_plotly, on = "plotly_hover", color = cols, persistent = TRUE, dynamic = TRUE
+        )
+        s <- attrs_selected(
+          showlegend = TRUE,
+          mode = "lines+markers",
+          marker = list(symbol = "x")
+        )
+        
+        
+        gg <- ggplotly(p, tooltip = "city") 
+        highlight(gg, persistent = TRUE, dynamic = TRUE)
+        # supply custom colors to the brush 
+        cols <- toRGB(RColorBrewer::brewer.pal(3, "Dark2"), 0.5)
+        highlight(
+          gg, on = "plotly_hover", color = cols, persistent = TRUE, dynamic = TRUE
+        )
+        # Use attrs_selected() for complete control over the selection appearance
+        # note any relevant colors you specify here should override the color argument
+        s <- attrs_selected(
+          showlegend = TRUE,
+          mode = "lines+markers",
+          marker = list(symbol = "x")
+        )
+        
         
         # [12:30 PM, 20 Sep, 2017] [To be done] Produce atable with instinct location of centers.
         DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE)
@@ -404,10 +436,10 @@ server <- function(input, output, session) {
                                        .packages = packages) %dopar% {
           custom_annot <- 
             annotation_custom(bar.testplot_list[[i]],
-                              xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
-                              xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size,
-                              ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
-                              ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size)
+              xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
+              xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size,
+              ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
+              ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size)
           # progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Allocating plots ", i, " / ", region_num))
           return(custom_annot)
         }

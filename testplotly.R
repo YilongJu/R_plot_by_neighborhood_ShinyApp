@@ -98,3 +98,33 @@ browseLocalHTML <- function(x) browseURL(paste0('file://', file.path(getwd(), x)
 OpenLocalHTML <- function(x) readLines(paste0('file://', file.path(getwd(), x)))
 t2 <- browseLocalHTML("nonres.html")
 t2 <- OpenLocalHTML("nonres.html")
+
+
+
+
+
+
+library(crosstalk)
+d <- SharedData$new(txhousing, ~city)
+p <- ggplot(d$data(), aes(date, median, group = city)) + geom_line()
+gg <- ggplotly(p, tooltip = "city") 
+highlight(gg, persistent = TRUE, dynamic = TRUE)
+
+# supply custom colors to the brush 
+cols <- toRGB(RColorBrewer::brewer.pal(3, "Dark2"), 0.5)
+highlight(
+  gg, on = "plotly_hover", color = cols, persistent = TRUE, dynamic = TRUE
+)
+
+# Use attrs_selected() for complete control over the selection appearance
+# note any relevant colors you specify here should override the color argument
+s <- attrs_selected(
+  showlegend = TRUE,
+  mode = "lines+markers",
+  marker = list(symbol = "x")
+)
+
+highlight(
+  layout(gg, showlegend = TRUE),  
+  selected = s, persistent = TRUE
+)
