@@ -15,19 +15,35 @@ library(rsconnect)
 library(plotly)
 library(crosstalk)
 library(doParallel)
+library(leaflet)
 
 # author: "Brooke", "Yilong"
 # date: [21 Sep, 2017]
 
+# [Function Declarations] ----
+GetBinforVar <- function(data, varName) {
+  range <- range(data[, varName], na.rm = TRUE)
+  maxPwd <- floor(log(range, 10))[2]
+  binNum <- floor(range[2]/10^maxPwd)
+  bin <- c(0:binNum, Inf) * 10^maxPwd
+  return(bin)
+}
+GetRadius <- function(data, varName, l = 2, u = 32) {
+  range <- range(data[, varName], na.rm = TRUE)
+  var <- data[, varName]
+  var <- (var - range[1])/(range[2] - range[1]) * (u - l) + l
+  return(var)
+}
+# Covert real number vector to percentage vector
+NumToPercentage <- function(numVec) {
+  PercVec <- paste0(round(100 * numVec, 2), "%")
+  return(PercVec)
+}
+
+
+
 # [Read data] ----
 # setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp")
-# data <- read.csv("ABM_censustract_file.csv")
-# names(data)[2] <- "BoroCT2000"
-# data <- data[order(data$BoroCT2000),]
-# data <- data[-1973, ]
-# varDef <- read.csv("Variable_Definitions.csv")
-# ct2000shp <- readOGR("nyct2000_12c/nyct2000_12c/nyct2000.shp")
-# boros <- readOGR("nybb_16a/nybb.shp")
 
 data <- read.csv("data/ABM_censustract_file.csv")
 names(data)[2] <- "BoroCT2000"
@@ -38,6 +54,9 @@ ct2000shp <- readOGR("data/nyct2000_12c/nyct2000_12c/nyct2000.shp")
 boros <- readOGR("data/nybb_16a/nybb.shp")
 ny.map <- readOGR("data/ZillowNeighborhoods-NY/ZillowNeighborhoods-NY.shp", layer="ZillowNeighborhoods-NY")
 
+# Reproject ct data, to be consistent with ny neighbor data
+ct2000shp <- spTransform(ct2000shp, ny.map@proj4string)
+
 # [Desciption of attributes] ----
 beginRow <- 6
 varNames <- varDef$varName[beginRow:nrow(varDef) - 1]
@@ -47,14 +66,7 @@ varDefinitions <- varDef$varFullDefinition[beginRow:nrow(varDef) - 1]
 checkboxGroupListIndex <- setNames(as.list(c(1:length(varNames))), varNames)
 checkboxGroupList <- setNames(as.list(varNames), varShortNames)
 
-
-
-# [Covert real number vector to percentage vector] ----
-NumToPercentage <- function(numVec) {
-  PercVec <- paste0(round(100 * numVec, 2), "%")
-  return(PercVec)
-}
-
+shapeDataList <- setNames(as.list(c("CT", "NB")), c("Census Tract Map", "Neighborhood Map"))
 # [Prepare Boros shape data] ----
 #   add to data a new column termed "id" composed of the rownames of data
 #   create a data.frame from our spatial object
@@ -77,13 +89,11 @@ ct2000shp@data$id <- rownames(ct2000shp@data)
 f_ct2000shp <- fortify(ct2000shp , polyname = "BoroCT2000")
 ct2000shp_DF <- merge(f_ct2000shp, ct2000shp@data, by = "id")
 
-
 # [Prepare ny neighborhood shape data] ----
 #   project the dataframe onto the shape file
 #   add to data a new column termed "id" composed of the rownames of data
 #   create a data.frame from our spatial object
 #   merge the "fortified" data with the data from our spatial object
-
 sodo <- ny.map[ny.map$City == "New York", ]
 dat <- data.frame(Longitude = data$ctrdlong, Latitude = data$ctrdlat)
 coordinates(dat) <- ~ Longitude + Latitude
@@ -95,110 +105,41 @@ dataProjected@data$id <- rownames(dataProjected@data)
 watershedPoints <- fortify(dataProjected, region = "id")
 watershedDF <- merge(watershedPoints, dataProjected@data, by = "id")
 
+# [Prepare useful data] ----
+data_ids <- data %>% select(BoroCT2000, Name)
+data_vars <- data %>% select(popdens:propnonw)
+data_coords <- data[, c("ctrdlong", "ctrdlat")]
+data_necessary <- cbind(data_ids, data_vars, data_coords)
+# --- For CT
+uCT <- data_necessary %>%
+  group_by(BoroCT2000) %>%
+  summarise_all(funs(mean))
+ct2000shp_DF$BoroCT2000 <- as.character(ct2000shp_DF$BoroCT2000)
+uCT$BoroCT2000 <- as.character(uCT$BoroCT2000)
+dfCT <- dplyr::left_join(ct2000shp_DF, uCT, by = "BoroCT2000")
+#   --- Find center of view
+center_ct.map <- ct2000shp_DF %>%
+  select(long, lat) %>%
+  summarise(ctrlong = mean(long), ctrlat = mean(lat))
+center_ct.map # -73.91271 40.69984
+#   --- Combine shapefile with data
+ct2000shp_attr <- ct2000shp
+ct2000shp_attr@data <- dplyr::left_join(ct2000shp_attr@data, uCT, by = "BoroCT2000")
 
+# --- For NB
+uNB <- data_necessary %>%
+  group_by(Name) %>%
+  summarise_all(funs(mean))
+dfNB <- dplyr::left_join(watershedDF, uNB, by = "Name")
+#   --- Find center of view
+center_ny.map <- watershedDF %>%
+  select(long, lat) %>%
+  summarise(ctrlong = mean(long), ctrlat = mean(lat))
+center_ny.map # -73.92194 40.68922
+#   --- Combine shapefile with data
+ny.map_attr <- ny.map
+ny.map_attr@data <- dplyr::left_join(ny.map_attr@data, uNB, by = "Name")
 
-
-
-
-# [Function for generating Plotly plot] ----
-#   Need to be declared after processing the data
-GetPlotlyPlot <- function(varIdx) {
-  # [Initialize variables] ----
-  # varIdx <- 2
-  varName <- varNames[varIdx]
-  varShortName <- varShortNames[varIdx]
-  
-  # [Get Plotly] ----
-  t2 <- data %>%
-    group_by(BoroCT2000) %>%
-    summarise_(gmean = interp(~mean(var), var = as.name(as.character(varName))))
-  t2$BoroCT2000 <- as.character(t2$BoroCT2000)
-  merge.shp.vars <- dplyr::left_join(ct2000shp_DF, t2, by = "BoroCT2000")
-  merge.shp.vars <- merge.shp.vars %>% 
-    select(-(CTLabel:CT2000), -(CDEligibil:NTACode), -(PUMA:Shape_Area))
-  
-  center_DF <- merge.shp.vars %>%
-    group_by(BoroCT2000) %>%
-    summarise(ctrdlong = mean(long), ctrdlat = mean(lat))
-  merge.shp.vars <- merge(merge.shp.vars, center_DF, by = "BoroCT2000")
-  merge.shp.vars_forPlotly <- merge.shp.vars %>%
-    select(BoroCT2000, ctrdlong, ctrdlat, gmean, NTANAme) %>%
-    distinct(BoroCT2000, .keep_all = TRUE)
-  merge.shp.vars_forPlotly$NTANAme <- as.character(merge.shp.vars_forPlotly$NTANAme)
-  merge.shp.vars$NTANAme <- as.character(merge.shp.vars$NTANAme)
-  merge.shp.vars$piece <- as.character(merge.shp.vars$piece)
-  merge.shp.vars$group <- as.character(merge.shp.vars$group)
-  
-  varIdxR <- varIdx %% 3
-  # varIdxR <- 1
-  Palette_list <- c("Reds", "Greens", "Blues")
-  
-  if (!is.na(showPercentage[varIdx])) {
-    result_plot <- ggplot() +
-      geom_polygon(data = merge.shp.vars,
-                   aes(long, lat, group = group,fill = gmean)) +
-      geom_polygon(data = boros_DF, aes(long, lat, group = group),
-                   fill = NA, color="black") +
-      geom_point(data = merge.shp.vars_forPlotly,
-                 aes(ctrdlong, ctrdlat), size = 0.2, alpha = 0.15) +
-      coord_equal(ratio = 1) +
-      scale_fill_distiller(labels = percent,
-                           name = paste0(varShortName, "(", varName, ")"),
-                           palette = Palette_list[varIdxR + 1],
-                           breaks = pretty_breaks(n = 4),
-                           direction = 1) +
-      # guides(fill = guide_legend(reverse = TRUE)) +
-      geom_text(data = bnames, aes(long, lat, label = BoroName),
-                size = 3, fontface = "bold") +
-      theme_nothing(legend=TRUE)
-  } else {
-    result_plot <- ggplot() +
-      geom_polygon(data = merge.shp.vars,
-                   aes(long, lat, group = group, fill = gmean)) +
-      geom_polygon(data = boros_DF, aes(long, lat, group = group),
-                   fill = NA, color="black") +
-      geom_point(data = merge.shp.vars_forPlotly,
-                 aes(ctrdlong, ctrdlat), size = 0.2, alpha = 0.15) +
-      coord_equal(ratio = 1) +
-      scale_fill_distiller(name = paste0(varShortName, " \n(", varName, ")"),
-                           palette = Palette_list[varIdxR + 1],
-                           breaks = pretty_breaks(n = 4),
-                           direction = 1) +
-      # guides(fill = guide_legend(reverse = TRUE)) +
-      geom_text(data = bnames, aes(long, lat, label = BoroName),
-                size = 3, fontface = "bold") +
-      theme_nothing(legend=TRUE)
-  }
-  result_plotly <- ggplotly(result_plot)
-  # [Modify Plotly] ----
-  result_plotly_build <- plotly_build(result_plotly)
-  centerPointDataLoc <- length(result_plotly_build$x$data) - 2
-  
-  if (!is.na(showPercentage[varIdx])) {
-    result_plotly_build$x$data[[centerPointDataLoc]]$hoverinfo <-
-      paste0("CT: ", merge.shp.vars_forPlotly$NTANAme,
-             "<br />", varShortNames[varIdx], ": ",
-             NumToPercentage(merge.shp.vars_forPlotly$gmean))
-    result_plotly_build$x$data[[centerPointDataLoc]]$text <-
-      paste0("CT: ", merge.shp.vars_forPlotly$NTANAme,
-             "<br />", varShortNames[varIdx], ": ",
-             NumToPercentage(merge.shp.vars_forPlotly$gmean))
-  } else {
-    result_plotly_build$x$data[[centerPointDataLoc]]$hoverinfo <-
-      paste0("CT: ", merge.shp.vars_forPlotly$NTANAme,
-             "<br />", varShortNames[varIdx], ": ",
-             merge.shp.vars_forPlotly$gmean)
-    result_plotly_build$x$data[[centerPointDataLoc]]$text <-
-      paste0("CT: ", merge.shp.vars_forPlotly$NTANAme,
-             "<br />", varShortNames[varIdx], ": ",
-             merge.shp.vars_forPlotly$gmean)
-  }
-  
-  # [Return Plotly plot] ----
-  return(result_plotly_build)
-}
-
-# [Make a test plotly plot] ----
 
 
 # [Define server ui] ----
@@ -207,56 +148,52 @@ ui <- fluidPage(
   titlePanel("VNSNY/UPENN ABMS Study"),
   navlistPanel(
     "Contents",
-    tabPanel("ABM Census", h3("Select the attributes and click Draw Plot to exhibit. (Wait for about 10s for plotting.)"),
-             # Sidebar layout with input and output definitions
-             sidebarLayout(
-               # Sidebar panel for inputs
-               sidebarPanel(
-                 # Input: Choose which variables to display
-                 checkboxGroupInput(inputId = "displayVariables",
-                                    label = h4("Select Variables"),
-                                    choices = checkboxGroupList,
-                                    selected = 2
-                 ),
-                 actionButton("Plot", "Draw plot"),
-                 verbatimTextOutput("value"),
-                 verbatimTextOutput("varLength"),
-                 fluidRow("Click the button to plot."),
-                 width = 2
-               ),
-               # Main panel for displaying outputs
-               mainPanel(
-                 fluidRow(
-                   plotlyOutput(outputId = "GIS", height = 800),
-                   width = 8
-                 ),
-                 fluidRow(
-                   htmlOutput("displayVarDef")
-                 )
-               )
-             )
+    tabPanel(
+     title = "ABM Census",
+     h3("Select the attributes and click Draw Plot to exhibit. (Wait for about 10s for plotting.)"),
+      # Sidebar layout with input and output definitions
+      sidebarLayout(
+        fluidRow(
+          column(
+            leafletOutput(outputId = "GIS", height = 600),
+            width = 10, offset = 1
+          )
+        ),
+        fluidRow(
+          column(
+            radioButtons(inputId = "ChooseShapefileID",
+                        label = h4("Select which map to show"),
+                        choices = shapeDataList),
+            # actionButton("Plot", "Draw plot"),
+            # textOutput("shapefileID"),
+            # fluidRow("Click the button to plot."),
+            width = 4
+          )
+        )
+      )
     ),
     tabPanel("Still Working", h3("This is the second panel"),
-             # Sidebar layout with input and output definitions
-             sidebarLayout(
-               
-               # Sidebar panel for inputs
-               sidebarPanel(
-                 
-                 # Input: Slider for the number of bins
-                 sliderInput(inputId = "bins",
-                             label = "Number of bins:",
-                             min = 1,
-                             max = 50,
-                             value = 30)
-               ),
-               # Main panel for displaying outputs
-               mainPanel(
-                 
-                 # Output: Histogram
-                 plotOutput(outputId = "distPlot")
-               )
-             )
+      # Sidebar layout with input and output definitions
+      sidebarLayout(
+      
+        # Sidebar panel for inputs
+        sidebarPanel(
+        
+        # Input: Slider for the number of bins
+        sliderInput(
+          inputId = "bins",
+          label = "Number of bins:",
+          min = 1,
+          max = 50,
+          value = 30)
+        ),
+        # Main panel for displaying outputs
+        mainPanel(
+        
+          # Output: Histogram
+          plotOutput(outputId = "distPlot")
+        )
+      )
     ),
     widths = c(2,10)
   )
@@ -274,293 +211,192 @@ server <- function(input, output, session) {
          main = "Histogram of waiting times")
   })
   
-  # Set up a variable to control the drawing
-  v <- reactiveValues(doPlot = FALSE)
-  # Detect whether the button is clicked
-  observeEvent(input$Plot, {
-    v$doPlot <- input$Plot
-  })
+  # # Set up a variable to control the drawing
+  # v <- reactiveValues(doPlot = FALSE)
+  # # Detect whether the button is clicked
+  # observeEvent(input$Plot, {
+  #   v$doPlot <- input$Plot
+  # })
   
-  output$value <- renderPrint({ input$displayVariables })
-  # output$selectedVars <- renderPrint({ colNames[input$displayVariables] })
-  output$varLength <- renderPrint({ length(input$displayVariables) })
-  output$displayVarDef <- renderUI({
-    HTML(paste("<b>", varDef[which(varDef$varName %in% input$displayVariables), "varFullDefinition"], "</b>", collapse = "</br>"))
-  })
-  
-  
-  diplayVarDefinition <- reactive({
-    input_VarLen <- length(input$displayVariables)
-    varNames <- input$displayVariables
-  })
+  output$shapefileID <- renderText({input$ChooseShapefileID})
+  # output$displayVarDef <- renderUI({
+  #   HTML(paste("<b>", varDef[which(varDef$varName %in% input$ChooseShapefileID), "varFullDefinition"], "</b>", collapse = "</br>"))
+  # })
   
   plotGIS <- reactive({
-    # If the button is not clicked, do not draw
-    if (v$doPlot == FALSE) {return(plotly_empty())}
+    # # If the button is not clicked, do not draw
+    # if (v$doPlot == FALSE) {
+    #   
+    # }
+    # Create a Progress object (for progess bar)
+    # progress <- shiny::Progress$new()
+    # Initialize the progressbar
+    # progress$set(message = "Plotting...", value = 0)
+    shapefile <- input$ChooseShapefileID
     
-    # Isolate the plot code, maintain the old plot until the button is clicked again
-    isolate({
-      input_VarLen <- length(input$displayVariables)
-      input_varNames <- input$displayVariables
-      # input_VarLen <- 1
-      # input_varNames <- c("povrate")
-
-      if (input_VarLen == 1) {
-        varName <- input_varNames[1]
-        varIdx <- checkboxGroupListIndex[[varName]]
-        result_plotly <- GetPlotlyPlot(varIdx)
-        return(result_plotly)
-      } else if (input_VarLen > 1) {
-        # Create a Progress object (for progess bar)
-        progress <- shiny::Progress$new()
-        # Initialize the progressbar
-        progress$set(message = "Plotting...", value = 0)
-
-        data_vars <- data[, input$displayVariables]
-        data_ids <- data[, "Name"]
-        # data_vars <- data[, c("popdens", "povrate")]
-        # input_VarLen <- 2
-        data_coords <- data[, c("ctrdlong", "ctrdlat")]
-        data_necessary <- cbind(Name = data_ids, data_vars, data_coords)
-        dim(data_necessary)
-        data_necessary_nonmissing <- data_necessary[complete.cases(data_necessary), ]
-        t2 <- data_necessary %>%
-          group_by(Name) %>%
-          summarise_all(funs(mean))
-        
-        DF <- dplyr::left_join(watershedDF, t2, by = "Name")
-        DF_nonmissing <- DF[complete.cases(DF[,(ncol(DF)-1):ncol(DF)]), ]
-        
-        # Draw a blank map
-        map_blankFrame <- ggplot(DF_nonmissing) +
-          geom_polygon(aes(x=long, y=lat, group = group), fill = "white") +
-          geom_path(aes(x=long, y=lat, group = group), color = "black", size = 0.2) +
-          geom_point(aes(x=ctrdlong, y=ctrdlat), size = 0.2) +
-          # geom_bar(data = DF, aes(x=long, y=lat, group = group, fill = Povrate.mean)) +
-          coord_equal() +
-          theme_minimal()
-        map_blankFrame
-        map_blankFrame_plotly <- ggplotly(map_blankFrame, tooltip = "group")
-        map_blankFrame_plotly
-        highlight(map_blankFrame_plotly, persistent = TRUE, dynamic = TRUE)
-        # supply custom colors to the brush 
-        cols <- toRGB(RColorBrewer::brewer.pal(3, "Dark2"), 0.5)
-        highlight(
-          map_blankFrame_plotly, on = "plotly_hover", color = cols, persistent = TRUE, dynamic = TRUE
-        )
-        s <- attrs_selected(
-          showlegend = TRUE,
-          mode = "lines+markers",
-          marker = list(symbol = "x")
-        )
-        
-        
-        gg <- ggplotly(p, tooltip = "city") 
-        highlight(gg, persistent = TRUE, dynamic = TRUE)
-        # supply custom colors to the brush 
-        cols <- toRGB(RColorBrewer::brewer.pal(3, "Dark2"), 0.5)
-        highlight(
-          gg, on = "plotly_hover", color = cols, persistent = TRUE, dynamic = TRUE
-        )
-        # Use attrs_selected() for complete control over the selection appearance
-        # note any relevant colors you specify here should override the color argument
-        s <- attrs_selected(
-          showlegend = TRUE,
-          mode = "lines+markers",
-          marker = list(symbol = "x")
-        )
-        
-        
-        # [12:30 PM, 20 Sep, 2017] [To be done] Produce atable with instinct location of centers.
-        DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE)
-        region_num <- nrow(DF_forBarPlot)
-        attr_num <- input_VarLen
-        
-        # Get centers for each region to display barplots
-        # Get attributes
-        DF_forBarPlot_attrs <- DF_forBarPlot[, (ncol(DF_forBarPlot) - (attr_num + 2)):ncol(DF_forBarPlot)]
-        DF_forBarPlot_centers <- DF_forBarPlot_attrs[,-c(2:(ncol(DF_forBarPlot_attrs)-2))]
-        DF_forBarPlot_attrs <- DF_forBarPlot_attrs[, 1:(ncol(DF_forBarPlot_attrs)-2)]
-        
-        # Standardize data
-        # DF_forBarPlot_attrs_mean <- colMeans(DF_forBarPlot_attrs[, -1], na.rm = TRUE)
-        # DF_forBarPlot_attrs_sd <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, sd, na.rm = TRUE)
-        # DF_forBarPlot_attrs_std <- (DF_forBarPlot_attrs[, 2:ncol(DF_forBarPlot_attrs)] - DF_forBarPlot_attrs_mean)/DF_forBarPlot_attrs_sd
-        
-        # Minmax Standardize
-        DF_forBarPlot_attrs_min <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, min, na.rm = TRUE)
-        DF_forBarPlot_attrs_max <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, max, na.rm = TRUE)
-        DF_forBarPlot_attrs_std <- sapply(c(1:2), function(i) {
-          (DF_forBarPlot_attrs[, i + 1] - DF_forBarPlot_attrs_min[i]) /
-            (DF_forBarPlot_attrs_max[i] - DF_forBarPlot_attrs_min)[i]
-        })
-        
-        # Melt data from plotting
-        DF_forBarPlot_attrs_std <- cbind(DF_forBarPlot_attrs[1], DF_forBarPlot_attrs_std)
-        melten_DF_attrs <- melt(DF_forBarPlot_attrs_std, id = "RegionID")
-        
-        # Summary all packages needed by children threads
-        packages <- c("rgdal", "tidyverse", "shiny", "lazyeval",
-                      "reshape2", "scales", "ggmap", "Cairo",
-                      "maptools", "rgeos", "scales", "RColorBrewer",
-                      "rsconnect", "plotly", "doParallel")
-        
-        # Register threads
-        cl <- makeCluster(8)
-        registerDoParallel(cl)
-        
-        lowColors <- c("#132B43", "#2B4313", "#43132B")
-        highColors <- c("#56B1F7", "#B1F756", "#F756B1")
-        
-        
-        # Get a mini barplot list
-        bar.testplot_list <- foreach(i = 1:region_num,
-                                     .packages = packages) %dopar% {
-          gt_plot <- ggplotGrob(
-            ggplot(melten_DF_attrs[which(melten_DF_attrs$RegionID ==
-                                           melten_DF_attrs$RegionID[i]),]) +
-              geom_bar(aes(factor(RegionID), value, group = variable),
-                       fill = c(lowColors[1], highColors[1]),
-                       position='dodge',stat='identity', color = "black") +
-              labs(x = "", y = "") +
-              theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
-          )
-          panel_coords <- gt_plot$layout[gt_plot$layout$name == "panel",]
-          # progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
-          return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
-        }
-        
-        barplot_size <- 5e-3
-        # Annotate mini barplots on their location
-        bar_annotation_list <- foreach(i = 1:region_num,
-                                       .packages = packages) %dopar% {
-          custom_annot <- 
-            annotation_custom(bar.testplot_list[[i]],
-              xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
-              xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size,
-              ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] - barplot_size,
-              ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$RegionID == melten_DF_attrs$RegionID[i]] + barplot_size)
-          # progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Allocating plots ", i, " / ", region_num))
-          return(custom_annot)
-        }
-        result_plot <- Reduce(`+`, bar_annotation_list, map_blankFrame)
-        progress$inc(floor(region_num/10)/(2*region_num + floor(region_num/10)), detail = "Showing plot.")
-        # Remember to close the processbar object.
-        on.exit(progress$close())
-        result_plotly <- ggplotly(result_plot)
-        return(result_plot)
-      } else {
-        return(plotly_empty())
-      }
+    if (shapefile == "CT") {
+      # progress$inc(1/5, detail = "Initializing...")
+      labels <- sprintf(
+        "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
+        ct2000shp_attr$NTANAme,
+        round(ct2000shp_attr$popdens),
+        round(ct2000shp_attr$povrate*100, 2)
+      ) %>% lapply(htmltools::HTML)
       
-      # Used for multiple variables ----
-      # if (input_VarLen > 1) {
-      #   # Create a Progress object (for progess bar)
-      #   progress <- shiny::Progress$new()
-      #   # Initialize the progressbar
-      #   progress$set(message = "Plotting...", value = 0)
-      #   data_ids <- data[, "BoroCT2000"]
-      #   data_ids <- as.character(data_ids)
-      #   # input_VarLen <- 2
-      #   data_vars <- data[, input$displayVariables]
-      #   # data_vars <- data[, c("popdens", "povrate")]
-      #   data_coords <- data[, c("ctrdlong", "ctrdlat")]
-      #   data_necessary <- cbind(BoroCT2000 = data_ids, data_vars, data_coords)
-      #   data_necessary_nonmissing <- data_necessary[complete.cases(data_necessary), ]
-      #   t2 <- data_necessary %>%
-      #     group_by(BoroCT2000) %>%
-      #     summarise_all(funs(mean))
-      #   
-      #   DF <- dplyr::left_join(ct2000shp_DF, t2, by = "BoroCT2000")
-      #   center_DF <- DF %>% 
-      #     group_by(BoroCT2000)%>%
-      #     summarise(clong = mean(long), clat = mean(lat))
-      #   DF <- left_join(DF, center_DF, by = "BoroCT2000")
-      #   DF$ctrdlong <- DF$clong
-      #   DF$ctrdlat <- DF$clat
-      #   DF <- DF[, -ncol(DF)]
-      #   DF <- DF[, -ncol(DF)]
-      #   
-      #   DF_nonmissing <- DF[complete.cases(DF[,(ncol(DF)-1):ncol(DF)]), ]
-      #   
-      #   # Draw a blank map
-      #   map_blankFrame <- ggplot(DF_nonmissing) +
-      #     geom_polygon(aes(x=long, y=lat, group = group), fill = "white") +
-      #     geom_path(aes(x=long, y=lat, group = group), color = "black", size = 0.2) +
-      #     geom_point(aes(x=ctrdlong, y=ctrdlat), size = 0.2) +
-      #     # geom_bar(data = DF, aes(x=long, y=lat, group = group, fill = Povrate.mean)) +
-      #     coord_equal() +
-      #     theme_nothing()
-      #   # map_blankFrame
-      #   
-      #   DF_forBarPlot <- DF_nonmissing %>% distinct(ctrdlong, ctrdlat, .keep_all = TRUE)
-      #   region_num <- nrow(DF_forBarPlot)
-      #   attr_num <- input_VarLen
-      #   
-      #   # Get centers for each region to display barplots
-      #   # Get attributes
-      #   # [ID, Attrbutes, ctrdlong, ctrdlat]
-      #   BoroCT2000_Idx <- which(colnames(DF_forBarPlot) == "BoroCT2000")
-      #   DF_forBarPlot_attrs <- DF_forBarPlot[, c(BoroCT2000_Idx, (ncol(DF_forBarPlot) - (attr_num + 2) + 1):ncol(DF_forBarPlot))]
-      #   # [ID, ctrdlong, ctrdlat]
-      #   DF_forBarPlot_centers <- DF_forBarPlot_attrs[,-c(2:(ncol(DF_forBarPlot_attrs)-2))]
-      #   # [ID, Attrbutes]
-      #   DF_forBarPlot_attrs <- DF_forBarPlot_attrs[, 1:(ncol(DF_forBarPlot_attrs)-2)]
-      #   
-      #   # Minmax Standardize
-      #   DF_forBarPlot_attrs_min <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, min, na.rm = TRUE)
-      #   DF_forBarPlot_attrs_max <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2, max, na.rm = TRUE)
-      #   DF_forBarPlot_attrs_std <- apply(as.matrix(DF_forBarPlot_attrs[, -1]), 2,
-      #                                    FUN = function(i){i <- (i - min(i, na.rm = TRUE))/
-      #                                      (max(i, na.rm = TRUE) - min(i, na.rm = TRUE))})
-      #   # (DF_forBarPlot_attrs[, 2:ncol(DF_forBarPlot_attrs)]
-      #   #                           - DF_forBarPlot_attrs_min) /(DF_forBarPlot_attrs_max
-      #   #                                                        - DF_forBarPlot_attrs_min)
-      #   
-      #   # Melt data from plotting
-      #   DF_forBarPlot_attrs_std <- cbind(DF_forBarPlot_attrs[1], DF_forBarPlot_attrs_std)
-      #   melten_DF_attrs <- melt(DF_forBarPlot_attrs_std, id = "BoroCT2000")
-      #   
-      #   # Get a mini barplot list
-      #   region_num <- 100
-      #   bar.testplot_list <- foreach(i = 1:region_num) %do% {
-      #     gt_plot <- ggplotGrob(
-      #       ggplot(melten_DF_attrs[which(melten_DF_attrs$BoroCT2000 == melten_DF_attrs$BoroCT2000[i]),]) +
-      #         geom_bar(aes(factor(BoroCT2000), value, group = variable), fill = rainbow(attr_num),
-      #                  position='dodge',stat='identity', color = "black") +
-      #         scale_fill_brewer(palette = "Spectral") +
-      #         labs(x = "", y = "") +
-      #         theme(legend.position = "none", rect = element_blank(), line = element_blank(), text = element_blank())
-      #     )
-      #     panel_coords <- gt_plot$layout[gt_plot$layout$name == "panel",]
-      #     # progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Draw for region ", i, " / ", region_num))
-      #     return(gt_plot[panel_coords$t:panel_coords$b, panel_coords$l:panel_coords$r])
-      #   }
-      #   
-      #   
-      #   barplot_size <- 500
-      #   # print(bar.testplot_list)
-      #   
-      #   bar_annotation_list <- foreach(i = 1:region_num) %do% {
-      #     custom_annot <- annotation_custom(bar.testplot_list[[i]],
-      #                                       xmin = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$BoroCT2000 == melten_DF_attrs$BoroCT2000[i]] - barplot_size,
-      #                                       xmax = DF_forBarPlot_centers$ctrdlong[DF_forBarPlot_centers$BoroCT2000 == melten_DF_attrs$BoroCT2000[i]] + barplot_size,
-      #                                       ymin = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$BoroCT2000 == melten_DF_attrs$BoroCT2000[i]] - barplot_size,
-      #                                       ymax = DF_forBarPlot_centers$ctrdlat[DF_forBarPlot_centers$BoroCT2000 == melten_DF_attrs$BoroCT2000[i]] + barplot_size)
-      #     progress$inc(1/(2*region_num + floor(region_num/10)), detail = paste("Allocating plots ", i, " / ", region_num))
-      #     return(custom_annot)
-      #   }
-      #   result_plot <- Reduce(`+`, bar_annotation_list, map_blankFrame)
-      #   progress$inc(floor(region_num/10)/(2*region_num + floor(region_num/10)), detail = "Showing plot.")
-      #   # Remember to close the processbar object.
-      #   on.exit(progress$close())
-      #   return(result_plot)
-      # }
-    })
+      bins <- GetBinforVar(uCT, "popdens")
+      pal <- colorBin("YlOrRd", domain = uCT$popdens, bins = bins)
+      
+      bins2 <- GetBinforVar(uCT, "povrate")
+      pal2 <- colorBin("blue", domain = uCT$povrate, bins = bins)
+      
+      # progress$inc(1/5, detail = "Adding tiles...")
+      map2 <- leaflet(ct2000shp_attr) %>% 
+        setView(-73.91271, 40.69984, 11) %>%
+        addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
+        addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
+        addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map")
+      
+      # progress$inc(1/5, detail = "Showing variables...")
+      map2 <- map2 %>%
+        addPolygons(weight = 4, color = "while") %>%
+        addPolygons(
+          fillColor = ~pal(popdens),
+          weight = 1,
+          opacity = 1,
+          color = "white",
+          dashArray = "3",
+          fillOpacity = 0.7,
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#666",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = F),
+          label = labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal",
+                         padding = "3px 8px"),
+            textsize = "15px",
+            direction = "auto"),
+          popup = "Hi",
+          group = "POPDENS"
+        )
+      
+      # progress$inc(1/5, detail = "Showing more variables...")
+      map2 <- map2 %>%
+        addCircles(
+          lng = ~ctrdlong, lat = ~ctrdlat,
+          weight = GetRadius(ct2000shp_attr@data, "povrate", 1, 8),
+          fill = ~pal2(povrate),
+          stroke = T, fillOpacity = 0.6, opacity = 0.6,
+          group = "PORVRATE"
+        )
+      
+      # progress$inc(1/5, detail = "Adding legends...")
+      map2 <- map2 %>%
+        addLegend(
+          pal = pal,
+          values = ~popdens,
+          opacity = 0.7,
+          title = "Popdens",
+          position = "bottomright",
+          group = "POPDENS"
+        ) %>%
+        addLegend(
+          colors = "blue",
+          labels = "<b>Povrate</b>",
+          values = ~povrate,
+          opacity = 0.7,
+          title = NULL,
+          position = "bottomright",
+          group = "PORVRATE"
+        ) %>%
+        addLayersControl(
+          baseGroups = c("Grey map", "Standard map", "Dark map"),
+          overlayGroups = c("POPDENS", "PORVRATE"),
+          options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
+        )
+      map2
+    }
+    else if (shapefile == "NB") {
+      bins <- GetBinforVar(dfNB, "popdens")
+      pal <- colorBin("YlOrRd", domain = dfNB$popdens, bins = bins)
+      
+      bins2 <- GetBinforVar(dfNB, "povrate")
+      pal2 <- colorBin("blue", domain = dfNB$povrate, bins = bins)
+      
+      labels <- sprintf(
+        "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
+        ny.map_attr$Name,
+        round(ny.map_attr$popdens),
+        round(ny.map_attr$povrate*100, 2)
+      ) %>% lapply(htmltools::HTML)
+      
+      map <- leaflet(ny.map_attr) %>% 
+        setView(-73.92194, 40.68922, 11) %>%
+        addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
+        addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
+        addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
+        addPolygons(weight = 4, color = "while") %>%
+        addPolygons(
+          fillColor = ~pal(popdens),
+          weight = 2,
+          opacity = 1,
+          color = "white",
+          dashArray = "3",
+          fillOpacity = 0.7,
+          highlight = highlightOptions(
+            weight = 5,
+            color = "#666",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = F),
+          label = labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal",
+                         padding = "3px 8px"),
+            textsize = "15px",
+            direction = "auto"),
+          popup = "Hi",
+          group = "POPDENS"
+        ) %>%
+        addLegend(
+          pal = pal,
+          values = ~popdens,
+          opacity = 0.7,
+          title = "Popdens",
+          position = "bottomright",
+          group = "POPDENS"
+        ) %>%
+        addLegend(
+          colors = "blue",
+          labels = "<b>Povrate</b>",
+          values = ~povrate,
+          opacity = 0.7,
+          title = NULL,
+          position = "bottomright",
+          group = "PORVRATE"
+        ) %>%
+        addCircles(
+          lng = ~ctrdlong, lat = ~ctrdlat,
+          weight = GetRadius(ny.map_attr@data, "povrate"),
+          fill = ~pal2(povrate),
+          stroke = T, fillOpacity = 0.8, opacity = 0.7,
+          group = "PORVRATE"
+        ) %>%
+        addLayersControl(
+          baseGroups = c("Grey map", "Standard map", "Dark map"),
+          overlayGroups = c("POPDENS", "PORVRATE"),
+          options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
+        )
+      map
+    }
+    # on.exit(progress$close())
+    # Isolate the plot code, maintain the old plot until the button is clicked again
     # Make sure it closes when we exit this reactive, even if there's an error
   })
   
-  output$GIS <- renderPlotly({plotGIS()})
+  output$GIS <- renderLeaflet({plotGIS()})
   
   
   
