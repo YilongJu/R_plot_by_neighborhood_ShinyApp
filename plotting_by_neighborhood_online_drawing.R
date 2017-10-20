@@ -16,17 +16,29 @@ library(plotly)
 library(crosstalk)
 library(doParallel)
 library(leaflet)
+library(OneR)
+library(Hmisc)
 
 # author: "Brooke", "Yilong"
 # date: [21 Sep, 2017]
 
 # [Function Declarations] ----
-GetBinforVar <- function(data, varName) {
-  range <- range(data[, varName], na.rm = TRUE)
-  maxPwd <- floor(log(range, 10))[2]
-  binNum <- floor(range[2]/10^maxPwd)
-  bin <- c(0:binNum, Inf) * 10^maxPwd
-  return(bin)
+GetBinforVar <- function(data, varName, nbins = 6) {
+  # data <- uCT
+  # varName <- "subacc"
+  numericValues <- unlist(c(data[, varName]), use.names = FALSE)
+  nbins_t = nbins
+  l <- 0
+  iter = 0
+  while (l < nbins && iter < 20) {
+    bins <- cut2(x = numericValues, g = nbins_t,
+                 levels.mean = T, onlycuts = T, digits = 2)
+    l <- length(bins)
+    nbins_t <- nbins_t + 1
+    iter <- iter + 1
+  }
+  bins <- signif(bins, 3)
+  return(bins)
 }
 GetRadius <- function(data, varName, l = 2, u = 32) {
   range <- range(data[, varName], na.rm = TRUE)
@@ -40,7 +52,7 @@ NumToPercentage <- function(numVec) {
   return(PercVec)
 }
 
-
+previousVar = ""
 
 # [Read data] ----
 # setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp")
@@ -64,8 +76,7 @@ varShortNames <- varDef$varShortName[beginRow:nrow(varDef) - 1]
 showPercentage <- varDef$showPercentage
 varDefinitions <- varDef$varFullDefinition[beginRow:nrow(varDef) - 1]
 checkboxGroupListIndex <- setNames(as.list(c(1:length(varNames))), varNames)
-checkboxGroupList <- setNames(as.list(varNames), varShortNames)
-
+checkboxGroupList <- setNames(as.list(as.character(varNames)), as.character(varShortNames))
 shapeDataList <- setNames(as.list(c("CT", "NB")), c("Census Tract Map", "Neighborhood Map"))
 # [Prepare Boros shape data] ----
 #   add to data a new column termed "id" composed of the rownames of data
@@ -140,8 +151,6 @@ center_ny.map # -73.92194 40.68922
 ny.map_attr <- ny.map
 ny.map_attr@data <- dplyr::left_join(ny.map_attr@data, uNB, by = "Name")
 
-
-
 # [Define server ui] ----
 ui <- fluidPage(
   # App title
@@ -155,7 +164,7 @@ ui <- fluidPage(
       sidebarLayout(
         fluidRow(
           column(
-            leafletOutput(outputId = "GIS", height = 600),
+            leafletOutput(outputId = "outputMap", height = 600),
             width = 10, offset = 1
           )
         ),
@@ -164,8 +173,15 @@ ui <- fluidPage(
             radioButtons(inputId = "ChooseShapefileID",
                         label = h4("Select which map to show"),
                         choices = shapeDataList),
+            selectInput("ChooseTileVar",
+                        "Variables to show on the tile:",
+                        unlist(checkboxGroupList)),
+            verbatimTextOutput("displaySomething"),
+            radioButtons(inputId = "ChooseTileVarID2",
+                         label = h4("Select which map to show"),
+                         choices = checkboxGroupList),
             # actionButton("Plot", "Draw plot"),
-            # textOutput("shapefileID"),
+            
             # fluidRow("Click the button to plot."),
             width = 4
           )
@@ -218,185 +234,317 @@ server <- function(input, output, session) {
   #   v$doPlot <- input$Plot
   # })
   
-  output$shapefileID <- renderText({input$ChooseShapefileID})
+  
+  tileVar_r <- reactive({input$ChooseTileVar})
+  map_r <- reactive({
+    if (input$ChooseShapefileID == "CT") {
+      return(ct2000shp_attr)
+    } else if (input$ChooseShapefileID == "NB") {
+      return(ny.map_attr)
+    }
+  })
+  mapDataDisplayLabel_r <- reactive({
+    if (input$ChooseShapefileID == "CT") {
+      return(ct2000shp_attr$NTANAme)
+    } else if (input$ChooseShapefileID == "NB") {
+      return(ny.map_attr$Name)
+    }
+  })
+  utilData_r <- reactive({
+    if (input$ChooseShapefileID == "CT") {
+      return(uCT)
+    } else if (input$ChooseShapefileID == "NB") {
+      return(uNB)
+    }
+  })
+  
+  
   # output$displayVarDef <- renderUI({
   #   HTML(paste("<b>", varDef[which(varDef$varName %in% input$ChooseShapefileID), "varFullDefinition"], "</b>", collapse = "</br>"))
   # })
-  
-  plotGIS <- reactive({
-    # # If the button is not clicked, do not draw
-    # if (v$doPlot == FALSE) {
-    #   
-    # }
-    # Create a Progress object (for progess bar)
-    # progress <- shiny::Progress$new()
-    # Initialize the progressbar
-    # progress$set(message = "Plotting...", value = 0)
-    shapefile <- input$ChooseShapefileID
-    
-    if (shapefile == "CT") {
-      # progress$inc(1/5, detail = "Initializing...")
-      labels <- sprintf(
-        "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
-        ct2000shp_attr$NTANAme,
-        round(ct2000shp_attr$popdens),
-        round(ct2000shp_attr$povrate*100, 2)
-      ) %>% lapply(htmltools::HTML)
-      
-      bins <- GetBinforVar(uCT, "popdens")
-      pal <- colorBin("YlOrRd", domain = uCT$popdens, bins = bins)
-      
-      bins2 <- GetBinforVar(uCT, "povrate")
-      pal2 <- colorBin("blue", domain = uCT$povrate, bins = bins)
-      
-      # progress$inc(1/5, detail = "Adding tiles...")
-      map2 <- leaflet(ct2000shp_attr) %>% 
-        setView(-73.91271, 40.69984, 11) %>%
-        addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
-        addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
-        addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map")
-      
-      # progress$inc(1/5, detail = "Showing variables...")
-      map2 <- map2 %>%
-        addPolygons(weight = 4, color = "while") %>%
-        addPolygons(
-          fillColor = ~pal(popdens),
-          weight = 1,
-          opacity = 1,
-          color = "white",
-          dashArray = "3",
-          fillOpacity = 0.7,
-          highlight = highlightOptions(
-            weight = 3,
-            color = "#666",
-            dashArray = "",
-            fillOpacity = 0.7,
-            bringToFront = F),
-          label = labels,
-          labelOptions = labelOptions(
-            style = list("font-weight" = "normal",
-                         padding = "3px 8px"),
-            textsize = "15px",
-            direction = "auto"),
-          popup = "Hi",
-          group = "POPDENS"
-        )
-      
-      # progress$inc(1/5, detail = "Showing more variables...")
-      map2 <- map2 %>%
-        addCircles(
-          lng = ~ctrdlong, lat = ~ctrdlat,
-          weight = GetRadius(ct2000shp_attr@data, "povrate", 1, 8),
-          fill = ~pal2(povrate),
-          stroke = T, fillOpacity = 0.6, opacity = 0.6,
-          group = "PORVRATE"
-        )
-      
-      # progress$inc(1/5, detail = "Adding legends...")
-      map2 <- map2 %>%
-        addLegend(
-          pal = pal,
-          values = ~popdens,
-          opacity = 0.7,
-          title = "Popdens",
-          position = "bottomright",
-          group = "POPDENS"
-        ) %>%
-        addLegend(
-          colors = "blue",
-          labels = "<b>Povrate</b>",
-          values = ~povrate,
-          opacity = 0.7,
-          title = NULL,
-          position = "bottomright",
-          group = "PORVRATE"
-        ) %>%
-        addLayersControl(
-          baseGroups = c("Grey map", "Standard map", "Dark map"),
-          overlayGroups = c("POPDENS", "PORVRATE"),
-          options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
-        )
-      map2
-    }
-    else if (shapefile == "NB") {
-      bins <- GetBinforVar(dfNB, "popdens")
-      pal <- colorBin("YlOrRd", domain = dfNB$popdens, bins = bins)
-      
-      bins2 <- GetBinforVar(dfNB, "povrate")
-      pal2 <- colorBin("blue", domain = dfNB$povrate, bins = bins)
-      
-      labels <- sprintf(
-        "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
-        ny.map_attr$Name,
-        round(ny.map_attr$popdens),
-        round(ny.map_attr$povrate*100, 2)
-      ) %>% lapply(htmltools::HTML)
-      
-      map <- leaflet(ny.map_attr) %>% 
-        setView(-73.92194, 40.68922, 11) %>%
-        addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
-        addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
-        addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
-        addPolygons(weight = 4, color = "while") %>%
-        addPolygons(
-          fillColor = ~pal(popdens),
-          weight = 2,
-          opacity = 1,
-          color = "white",
-          dashArray = "3",
-          fillOpacity = 0.7,
-          highlight = highlightOptions(
-            weight = 5,
-            color = "#666",
-            dashArray = "",
-            fillOpacity = 0.7,
-            bringToFront = F),
-          label = labels,
-          labelOptions = labelOptions(
-            style = list("font-weight" = "normal",
-                         padding = "3px 8px"),
-            textsize = "15px",
-            direction = "auto"),
-          popup = "Hi",
-          group = "POPDENS"
-        ) %>%
-        addLegend(
-          pal = pal,
-          values = ~popdens,
-          opacity = 0.7,
-          title = "Popdens",
-          position = "bottomright",
-          group = "POPDENS"
-        ) %>%
-        addLegend(
-          colors = "blue",
-          labels = "<b>Povrate</b>",
-          values = ~povrate,
-          opacity = 0.7,
-          title = NULL,
-          position = "bottomright",
-          group = "PORVRATE"
-        ) %>%
-        addCircles(
-          lng = ~ctrdlong, lat = ~ctrdlat,
-          weight = GetRadius(ny.map_attr@data, "povrate"),
-          fill = ~pal2(povrate),
-          stroke = T, fillOpacity = 0.8, opacity = 0.7,
-          group = "PORVRATE"
-        ) %>%
-        addLayersControl(
-          baseGroups = c("Grey map", "Standard map", "Dark map"),
-          overlayGroups = c("POPDENS", "PORVRATE"),
-          options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
-        )
-      map
-    }
-    # on.exit(progress$close())
-    # Isolate the plot code, maintain the old plot until the button is clicked again
-    # Make sure it closes when we exit this reactive, even if there's an error
+
+  output$displaySomething <- renderPrint({
+    paste(input$ChooseTileVar,
+          checkboxGroupListIndex[[input$ChooseTileVar]],
+          !is.na(showPercentage[checkboxGroupListIndex[[input$ChooseTileVar]]]),
+          sep = ", "
+    )
   })
   
-  output$GIS <- renderLeaflet({plotGIS()})
+  output$outputMap <- renderLeaflet({
+      map <- leaflet(map_r()) %>% 
+      setView(-73.91271, 40.69984, 11) %>%
+      addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
+      addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
+      addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
+      addLayersControl(
+        baseGroups = c("Grey map", "Standard map", "Dark map"),
+        options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
+      )
+    })
+  
+  observe({
+    
+    
+    map <- map_r()
+    mapData <- map@data
+    mapDataDisplayLabel <- mapDataDisplayLabel_r()
+    utilData <- utilData_r()
+    
+    tileVar <- input$ChooseTileVar
+    tileVarIdx <- checkboxGroupListIndex[[tileVar]]
+    showPercentage[checkboxGroupListIndex[[input$ChooseTileVar]]]
+    if(!is.na(showPercentage[tileVarIdx])) {
+      cat("TRUE")
+      varValues <- round(mapData[, tileVar]*100, 2)
+    } else {
+      varValues <- mapData[, tileVar]
+    }
+    # varValues <- unlist(varValues, use.names = FALSE)
+
+    proxy <- leafletProxy("outputMap", data = map)
+    # labels <- mapply(function(x, y) {
+    #   HTML(sprintf("<strong>%s</strong><br/>%s: %g<br/>",
+    #                x, tileVar, y))},
+    #   mapDataDisplayLabel,
+    #   varValues,
+    #   SIMPLIFY = TRUE
+    # )
+    labels <- sprintf("<strong>%s</strong><br/><b>%s:</b> %g<br/>",
+                      mapDataDisplayLabel, tileVar, varValues)
+    labels <- lapply(labels, HTML)
+      
+    # labels <- sprintf("<strong>A</strong><br/>B: C")
+    # labels <- paste0("<strong>", mapDataDisplayLabel,
+    #                  "</strong>\n", tileVar, ": ", varValues)
+    # bins <- GetBinforVar(utilData, tileVar)
+    # pal <- colorBin("YlOrRd", domain = utilData[, tileVar], bins = bins)
+    # varName <- "subdens"
+    # varName <- "subacc"
+    # varName <- "popdens"
+    numericValues <- unlist(c(data[, varName]), use.names = FALSE)
+    if (tileVar == "subacc") {
+      factorValues <- as.factor(numericValues)
+      pal <- colorFactor("YlOrRd", domain = factorValues)
+    } else {
+      pal <- colorQuantile("YlOrRd", domain = numericValues, n = 6)
+    }
+    
+
+    proxy <- proxy %>%
+      clearShapes() %>%
+      addPolygons(weight = 4, color = "while") %>%
+      addPolygons(
+        fillColor = pal(mapData[, tileVar]),
+        weight = 1,
+        opacity = 1,
+        color = "white",
+        dashArray = "3",
+        fillOpacity = 0.7,
+        highlight = highlightOptions(
+          weight = 3,
+          color = "#666",
+          dashArray = "",
+          fillOpacity = 0.7,
+          bringToFront = F),
+        label = labels,
+        labelOptions = labelOptions(
+          style = list("font-weight" = "normal",
+                       padding = "3px 8px"),
+          textsize = "15px",
+          direction = "auto"),
+        popup = tileVar,
+        group = paste0(tileVar, "G")
+      ) 
+    proxy <- proxy %>%
+      clearControls() %>%
+      addLegend(
+        pal = pal,
+        values = mapData[, tileVar],
+        opacity = 0.7,
+        title = tileVar,
+        position = "bottomright",
+        group = paste0(tileVar, "G")
+      )
+    proxy
+  })
+  
+  # plotGIS_r <- reactive({
+  #   # # If the button is not clicked, do not draw
+  #   # if (v$doPlot == FALSE) {
+  #   #   
+  #   # }
+  #   # Create a Progress object (for progess bar)
+  #   # progress <- shiny::Progress$new()
+  #   # Initialize the progressbar
+  #   # progress$set(message = "Plotting...", value = 0)
+  #   shapefile <- input$ChooseShapefileID
+  #   tileVar <- tileVar_r()
+  #   
+  #   if (shapefile == "CT") {
+  #     # progress$inc(1/5, detail = "Initializing...")
+  #     labels <- sprintf(
+  #       "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
+  #       ct2000shp_attr$NTANAme,
+  #       round(ct2000shp_attr[, tileVar]),
+  #       round(ct2000shp_attr$povrate*100, 2)
+  #     ) %>% lapply(htmltools::HTML)
+  #     
+  #     bins <- GetBinforVar(uCT, tileVar)
+  #     pal <- colorBin("YlOrRd", domain = uCT[ ,tileVar], bins = bins)
+  #     
+  #     bins2 <- GetBinforVar(uCT, "povrate")
+  #     pal2 <- colorBin("blue", domain = uCT$povrate, bins = bins)
+  #     
+  #     # progress$inc(1/5, detail = "Adding tiles...")
+  #     map2 <- leaflet(ct2000shp_attr) %>% 
+  #       setView(-73.91271, 40.69984, 11) %>%
+  #       addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
+  #       addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
+  #       addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map")
+  #     
+  #     # progress$inc(1/5, detail = "Showing variables...")
+  #     map2 <- map2 %>%
+  #       addPolygons(weight = 4, color = "while") %>%
+  #       addPolygons(
+  #         fillColor = ~pal(popdens),
+  #         weight = 1,
+  #         opacity = 1,
+  #         color = "white",
+  #         dashArray = "3",
+  #         fillOpacity = 0.7,
+  #         highlight = highlightOptions(
+  #           weight = 3,
+  #           color = "#666",
+  #           dashArray = "",
+  #           fillOpacity = 0.7,
+  #           bringToFront = F),
+  #         label = labels,
+  #         labelOptions = labelOptions(
+  #           style = list("font-weight" = "normal",
+  #                        padding = "3px 8px"),
+  #           textsize = "15px",
+  #           direction = "auto"),
+  #         popup = "Hi",
+  #         group = "POPDENS"
+  #       )
+  #     
+  #     # progress$inc(1/5, detail = "Showing more variables...")
+  #     map2 <- map2 %>%
+  #       addCircles(
+  #         lng = ~ctrdlong, lat = ~ctrdlat,
+  #         weight = GetRadius(ct2000shp_attr@data, "povrate", 1, 8),
+  #         fill = ~pal2(povrate),
+  #         stroke = T, fillOpacity = 0.6, opacity = 0.6,
+  #         group = "PORVRATE"
+  #       )
+  #     
+  #     # progress$inc(1/5, detail = "Adding legends...")
+  #     map2 <- map2 %>%
+  #       addLegend(
+  #         pal = pal,
+  #         values = ~popdens,
+  #         opacity = 0.7,
+  #         title = "Popdens",
+  #         position = "bottomright",
+  #         group = "POPDENS"
+  #       ) %>%
+  #       addLegend(
+  #         colors = "blue",
+  #         labels = "<b>Povrate</b>",
+  #         values = ~povrate,
+  #         opacity = 0.7,
+  #         title = NULL,
+  #         position = "bottomright",
+  #         group = "PORVRATE"
+  #       ) %>%
+  #       addLayersControl(
+  #         baseGroups = c("Grey map", "Standard map", "Dark map"),
+  #         overlayGroups = c("POPDENS", "PORVRATE"),
+  #         options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
+  #       )
+  #     map2
+  #   }
+  #   else if (shapefile == "NB") {
+  #     bins <- GetBinforVar(dfNB, "popdens")
+  #     pal <- colorBin("YlOrRd", domain = dfNB$popdens, bins = bins)
+  #     
+  #     bins2 <- GetBinforVar(dfNB, "povrate")
+  #     pal2 <- colorBin("blue", domain = dfNB$povrate, bins = bins)
+  #     
+  #     labels <- sprintf(
+  #       "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
+  #       ny.map_attr$Name,
+  #       round(ny.map_attr$popdens),
+  #       round(ny.map_attr$povrate*100, 2)
+  #     ) %>% lapply(htmltools::HTML)
+  #     
+  #     map <- leaflet(ny.map_attr) %>% 
+  #       setView(-73.92194, 40.68922, 11) %>%
+  #       addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
+  #       addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
+  #       addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
+  #       addPolygons(weight = 4, color = "while") %>%
+  #       addPolygons(
+  #         fillColor = ~pal(popdens),
+  #         weight = 2,
+  #         opacity = 1,
+  #         color = "white",
+  #         dashArray = "3",
+  #         fillOpacity = 0.7,
+  #         highlight = highlightOptions(
+  #           weight = 5,
+  #           color = "#666",
+  #           dashArray = "",
+  #           fillOpacity = 0.7,
+  #           bringToFront = F),
+  #         label = labels,
+  #         labelOptions = labelOptions(
+  #           style = list("font-weight" = "normal",
+  #                        padding = "3px 8px"),
+  #           textsize = "15px",
+  #           direction = "auto"),
+  #         popup = "Hi",
+  #         group = "POPDENS"
+  #       ) %>%
+  #       addLegend(
+  #         pal = pal,
+  #         values = ~popdens,
+  #         opacity = 0.7,
+  #         title = "Popdens",
+  #         position = "bottomright",
+  #         group = "POPDENS"
+  #       ) %>%
+  #       addLegend(
+  #         colors = "blue",
+  #         labels = "<b>Povrate</b>",
+  #         values = ~povrate,
+  #         opacity = 0.7,
+  #         title = NULL,
+  #         position = "bottomright",
+  #         group = "PORVRATE"
+  #       ) %>%
+  #       addCircles(
+  #         lng = ~ctrdlong, lat = ~ctrdlat,
+  #         weight = GetRadius(ny.map_attr@data, "povrate"),
+  #         fill = ~pal2(povrate),
+  #         stroke = T, fillOpacity = 0.8, opacity = 0.7,
+  #         group = "PORVRATE"
+  #       ) %>%
+  #       addLayersControl(
+  #         baseGroups = c("Grey map", "Standard map", "Dark map"),
+  #         overlayGroups = c("POPDENS", "PORVRATE"),
+  #         options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
+  #       )
+  #     map
+  #   }
+  #   # on.exit(progress$close())
+  #   # Isolate the plot code, maintain the old plot until the button is clicked again
+  #   # Make sure it closes when we exit this reactive, even if there's an error
+  # })
+  
+  
+  
   
   
   

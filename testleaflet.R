@@ -269,3 +269,52 @@ map2
 # DF[which(DF$Name == "Upper East Side"),] %>%
 #   select(popdens:propnonw) %>%
 #   summarise_all(funs(mean))
+
+r <- c("a" = "b")
+colnames(r)
+names(r)
+
+checkboxGroupList
+
+shapeDataList <- setNames(as.list(c("CT", "NB")), c("Census Tract Map", "Neighborhood Map"))
+class(unlist(shapeDataList))
+c(shapeDataList)
+as.vector(shapeDataList)
+unlist(shapeDataList, use.names=FALSE)
+cn <- unlist(shapeDataList)
+names(cn) <- c()
+charVec <- unlist(shapeDataList, use.names=FALSE)
+class(charVec)
+
+labels <- sprintf("<strong>%s</strong><br/>A:", charVec)
+labels <- lapply(labels, HTML)
+labels[[1]]
+class(labels[[1]])
+class(as.vector(unlist(labels)))
+
+class(HTML(sprintf("<strong>%s</strong><br/>A:", charVec)))
+
+library(dplyr)
+library(OneR)
+score<-c(77,61,74,47,65,51,25,64,69,52, NA)
+ntile(score, 10)
+
+bin(score, method = "length", na.omit = T)
+bin(score, method = "content", na.omit = F)
+score
+
+
+bins2c <- bin(score, method = "content", na.omit = F)
+bins2c <- as.character(bins2c)
+bins2c <- unlist(strsplit(bins2c, ","), use.names = FALSE)
+bins2c <- gsub("(", "", bins2c, fixed = TRUE)
+bins2c <- gsub("]", "", bins2c, fixed = TRUE)
+bins2c <- as.numeric(bins2c)
+bins2c <- unique(bins2c)
+bins2c <- sort(bins2c)
+bins2c <- c(bins2c, Inf)
+bins2c
+distinct(bins2c)
+
+str(bins)
+
