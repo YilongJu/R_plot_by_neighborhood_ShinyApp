@@ -15,6 +15,7 @@ library(rsconnect)
 library(plotly)
 library(doParallel)
 library(geojsonio)
+library(moments)
 
 setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp")
 data <- read.csv("data/ABM_censustract_file.csv")
@@ -117,7 +118,7 @@ bins <- GetBinforVar(DF, "popdens")
 pal <- colorBin("YlOrRd", domain = DF$popdens, bins = bins)
 
 bins2 <- GetBinforVar(DF, "povrate")
-pal2 <- colorBin("blue", domain = DF$povrate, bins = bins)
+pal2 <- colorBin("YlOrRd", domain = DF$povrate, bins = bins)
 
 
 labels <- sprintf(
@@ -194,9 +195,9 @@ map %>% addPopups(-73.92194, 40.68922, "Haha",
 ct2000shp_attr <- ct2000shp
 ct2000shp_attr@data <- dplyr::left_join(ct2000shp_attr@data, t2, by = "BoroCT2000")
 labels <- sprintf(
-  "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
+  "<strong>%s</strong><br/><b>propoa:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
   ct2000shp_attr$Name,
-  round(ct2000shp_attr$popdens),
+  signif(ct2000shp_attr$propoa, digits = 4),
   round(ct2000shp_attr$povrate*100, 2)
 ) %>% lapply(htmltools::HTML)
 
@@ -206,6 +207,10 @@ pal <- colorBin("YlOrRd", domain = DFCT$popdens, bins = bins)
 bins2 <- GetBinforVar(DFCT, "povrate")
 pal2 <- colorBin("blue", domain = DFCT$povrate, bins = bins)
 
+# pal <- colorFactor("YlOrRd", domain = DFCT$propoa)
+
+# bins <- GetBinforVar(DFCT, "propoa")
+pal <- colorQuantile("YlOrRd", domain = DFCT$propoa, n = 6)
 
 map2 <- leaflet(ct2000shp_attr) %>% 
   setView(-73.91271, 40.69984, 10) %>%
@@ -214,7 +219,7 @@ map2 <- leaflet(ct2000shp_attr) %>%
   addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
   addPolygons(weight = 4, color = "while") %>%
   addPolygons(
-    fillColor = ~pal(popdens),
+    fillColor = ~pal(propoa),
     weight = 1,
     opacity = 1,
     color = "white",
@@ -233,15 +238,15 @@ map2 <- leaflet(ct2000shp_attr) %>%
       textsize = "15px",
       direction = "auto"),
     popup = "Hi",
-    group = "POPDENS"
+    group = "propoa"
   ) %>%
   addLegend(
     pal = pal,
-    values = ~popdens,
+    values = ~propoa,
     opacity = 0.7,
-    title = "Popdens",
+    title = "propoa",
     position = "bottomright",
-    group = "POPDENS"
+    group = "propoa"
   ) %>%
   addLegend(
     colors = "blue",
@@ -261,7 +266,7 @@ map2 <- leaflet(ct2000shp_attr) %>%
   ) %>%
   addLayersControl(
     baseGroups = c("Grey map", "Standard map", "Dark map"),
-    overlayGroups = c("POPDENS", "PORVRATE"),
+    overlayGroups = c("SUBACC", "PORVRATE"),
     options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
   )
 map2
@@ -317,4 +322,59 @@ bins2c
 distinct(bins2c)
 
 str(bins)
+
+
+ct2000shp_attr@data[(grep("New Springville", ct2000shp_attr@data$NTANAme)), ]
+
+grep("New", "New Jerse")
+
+t2[(grep("New Springville", t2$NTANAme)), ]
+
+
+hist(ct2000shp_attr@data$propoa)
+skewness(ct2000shp_attr@data$propoa, na.rm = T)
+
+for (i in c(14:(ncol(ct2000shp_attr@data)-2))) {
+  cat(i)
+  cat(" ")
+  cat(colnames(ct2000shp_attr@data)[i])
+  cat(" ")
+  cat(skewness(ct2000shp_attr@data[, i], na.rm = T))
+  cat("\n")
+}
+
+# 14 popdens 1.343795
+# 15 povrate 1.234926
+# 16 unemp 3.464564
+# 17 busdens 1.746421
+# 18 subdens 4.324664
+# 19 subacc 0.9209122
+# 20 intdens 1.237663
+# 21 landind -0.7006325
+# 22 nonres 0.9757777
+# 23 resid -0.9757777
+# 24 ptrans -0.4222936
+# 25 pwalk 2.578755
+# 26 propoa 3.763291
+# 27 propnonw -0.1569466
+
+
+hist(as.numeric(as.character(ct2000shp_attr@data[, 22])))
+
+abs(-1)
+
+naa <- c("a", "b", "c")
+for (t in naa) {
+  cat(t)
+}
+
+  
+GetRadius <- function(varValue, l = 2, u = 32) {
+  range <- range(varValue, na.rm = TRUE)
+  varValue <- (varValue - range[1])/(range[2] - range[1]) * (u - l) + l
+  return(varValue)
+}
+
+
+
 
