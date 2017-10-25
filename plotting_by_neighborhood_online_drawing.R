@@ -19,6 +19,7 @@ library(leaflet)
 library(OneR)
 library(Hmisc)
 library(moments)
+library(colorspace)
 
 # author: "Brooke", "Yilong"
 # date: [21 Sep, 2017]
@@ -52,8 +53,6 @@ NumToPercentage <- function(numVec) {
   return(PercVec)
 }
 
-previousVar = ""
-
 # [Read data] ----
 # setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp")
 
@@ -72,13 +71,30 @@ ct2000shp <- spTransform(ct2000shp, ny.map@proj4string)
 # [Desciption of attributes] ----
 beginRow <- 6
 varNames <- varDef$varName[beginRow:nrow(varDef) - 1]
-varShortNames <- varDef$varShortName[beginRow:nrow(varDef) - 1]
+varShortNames <- as.character(varDef$varShortName[beginRow:nrow(varDef) - 1])
 showPercentage <- varDef$showPercentage[beginRow:nrow(varDef) - 1]
 varDefinitions <- varDef$varFullDefinition[beginRow:nrow(varDef) - 1]
 checkboxGroupListIndex <- setNames(as.list(c(1:length(varNames))), varNames)
 checkboxGroupList <- setNames(as.list(as.character(varNames)), as.character(varShortNames))
 shapeDataList <- setNames(as.list(c("CT", "NB")), c("Census Tract Map", "Neighborhood Map"))
-varColors <- rainbow(length(varNames))
+
+ShowColors <- function(col, border = "light gray", ...) {
+      n <- length(col)
+      plot(0, 0, type="n", xlim = c(0, 1), ylim = c(0, 1),
+           axes = FALSE, xlab = "", ylab = "")
+      rect(0:(n-1)/n, 0, 1:n/n, 1, col = col, border = border)
+   }
+
+varColors <- rainbow_hcl(length(varNames), c = 150, l = 60)
+ShowColors(varColors)
+# 
+# varColors <- terrain.colors(length(varNames))
+# varColors <- cm.colors(length(varNames))
+# varColors <- rainbow_hcl(length(varNames), start = 60, end = 240)
+# varColors <- diverge_hcl(length(varNames),
+#                          h = c(800, 300), c = 100, l = c(20, 130), power = 0.4)
+# ShowColors(varColors)
+
 # [Prepare Boros shape data] ----
 #   add to data a new column termed "id" composed of the rownames of data
 #   create a data.frame from our spatial object
@@ -152,8 +168,15 @@ center_ny.map # -73.92194 40.68922
 ny.map_attr <- ny.map
 ny.map_attr@data <- dplyr::left_join(ny.map_attr@data, uNB, by = "Name")
 
+data_necessary$BoroCT2000 <- as.character(data_necessary$BoroCT2000)
+NBname_CTntaname <- full_join(data_necessary, ct2000shp_DF, by = "BoroCT2000")
+NBname_CTntaname <- NBname_CTntaname %>%
+  distinct(Name, NTANAme) %>%
+  arrange(Name)
+NBname_CTntaname <- aggregate(NTANAme ~ Name, data = NBname_CTntaname,
+                              FUN = paste0, collapse = "<br/>")
 
-
+ny.map_attr@data <- left_join(ny.map_attr@data, NBname_CTntaname, by = "Name")
 
 
 # [Define server ui] ----
@@ -169,8 +192,8 @@ ui <- fluidPage(
       sidebarLayout(
         fluidRow(
           column(
-            leafletOutput(outputId = "outputMap", height = 600),
-            width = 10, offset = 1
+            leafletOutput(outputId = "outputMap", height = 800),
+            width = 10.5, offset = 0.5
           )
         ),
         fluidRow(
@@ -188,18 +211,19 @@ ui <- fluidPage(
             # actionButton("Plot", "Draw plot"),
             
             # fluidRow("Click the button to plot."),
-            width = 4
+            width = 3
           ),
           column(
             checkboxGroupInput(inputId = "ChooseLabelVars",
-                         label = h4("Add variables"),
+                         label = h4("Check variable definitions"),
                          choices = checkboxGroupList,
                          inline = FALSE),
+            width = 3
+          ),
+          column(
             verbatimTextOutput("displaySomething2"),
-            # actionButton("Plot", "Draw plot"),
-            
-            # fluidRow("Click the button to plot."),
-            width = 4
+            uiOutput("varDefOutput"),
+            width = 5
           )
         )
       )
@@ -275,25 +299,49 @@ server <- function(input, output, session) {
   })
   radiusRange_r <- reactive({
     if (input$ChooseShapefileID == "CT") {
-      return(c(1,8))
+      return(c(1,12))
     } else if (input$ChooseShapefileID == "NB") {
       return(c(2,32))
     }
   })
-  
-  
-  # output$displayVarDef <- renderUI({
-  #   HTML(paste("<b>", varDef[which(varDef$varName %in% input$ChooseShapefileID), "varFullDefinition"], "</b>", collapse = "</br>"))
-  # })
-
-  output$displaySomething <- renderPrint({
-    paste(input$ChooseTileVar,
-          checkboxGroupListIndex[[input$ChooseTileVar]],
-          showPercentage[checkboxGroupListIndex[[input$ChooseTileVar]]],
-          sep = ", "
-    )
+  CTNames_r <- reactive({
+    if (input$ChooseShapefileID == "CT") {
+      return(FALSE)
+    } else if (input$ChooseShapefileID == "NB") {
+      return(TRUE)
+    }
   })
-  output$displaySomething2 <- renderPrint({input$ChooseLabelVars
+
+  # output$displaySomething <- renderPrint({
+  #   paste(input$ChooseTileVar,
+  #         checkboxGroupListIndex[[input$ChooseTileVar]],
+  #         showPercentage[checkboxGroupListIndex[[input$ChooseTileVar]]],
+  #         sep = ", "
+  #   )
+  # })
+  
+  # output$displaySomething2 <- renderPrint({
+  #   input$ChooseLabelVars
+  # })
+  
+  varDefOutput_r <- reactive({
+    label <- "<h4>Variable Definitions</h4>"
+    for (var in input$ChooseLabelVars) {
+      # cat(var, "\n")
+      varId <- checkboxGroupListIndex[[var]]
+      # cat(varId, "\n")
+      varSN <- varShortNames[varId]
+      # cat(varSN)
+      varD <- varDefinitions[varId]
+      # cat(varD, "\n")
+      label <- paste0(label, "<h5>", varSN, ":</h5>", varD, "<br/>")
+      # cat(label, "\n")
+    }
+    HTML(label)
+  })
+  
+  output$varDefOutput <- renderUI({
+    varDefOutput_r()
   })
   
   output$outputMap <- renderLeaflet({
@@ -315,25 +363,35 @@ server <- function(input, output, session) {
     mapDataDisplayLabel <- mapDataDisplayLabel_r()
     utilData <- utilData_r()
     radiusRange <- radiusRange_r()
+    CTNames <- CTNames_r()
     
     tileVar <- input$ChooseTileVar
-    labelVars <- input$ChooseLabelVars
+    # labelVars <- input$ChooseLabelVars
     restVars <- varNames[varNames != tileVar]
     labelVars <- restVars
     tileVarIdx <- checkboxGroupListIndex[[tileVar]]
     
     if(showPercentage[tileVarIdx] == 1) {
-      varValues <- round(mapData[, tileVar]*100, 2)
-      labels <- sprintf("<strong>%s</strong><br/><b><u>%s:</u></b> %g%%<br/>",
-                        mapDataDisplayLabel, tileVar, signif(varValues, 4))
+      varValues <- mapData[, tileVar]*100
+      labels <- sprintf("<h3><strong>%s</strong></h3><br/><b><u>%s:</u></b> %g%%<br/>",
+                        mapDataDisplayLabel, varShortNames[tileVarIdx], signif(varValues, 4))
     } else {
       varValues <- mapData[, tileVar]
       labels <- sprintf("<strong>%s</strong><br/><b><u>%s:</u></b> %g<br/>",
-                        mapDataDisplayLabel, tileVar, signif(varValues, 4))
+                        mapDataDisplayLabel, varShortNames[tileVarIdx], signif(varValues, 4))
     }
     for (labelVar in labelVars) {
-      labels <- paste0(labels, "<b>", labelVar, ":</b> ",
-                       signif(mapData[, labelVar], 4), "<br/>")
+      labelVarIdx <- checkboxGroupListIndex[[labelVar]]
+      if(showPercentage[labelVarIdx] == 1) {
+        labels <- paste0(labels, "<b>", varShortNames[labelVarIdx], ":</b> ",
+                         signif(100*mapData[, labelVar], 4), "%<br/>")
+      } else {
+        labels <- paste0(labels, "<b>", varShortNames[labelVarIdx], ":</b> ",
+                         signif(mapData[, labelVar], 4), "<br/>")
+      }
+    }
+    if (CTNames) {
+      labels <- paste0(labels, "<strong>CTs:</strong><br/>", mapData$NTANAme)
     }
     
     labels <- lapply(labels, HTML)
@@ -343,13 +401,16 @@ server <- function(input, output, session) {
     # tileVar <- "subdens"
     # tileVar <- "subacc"
     # tileVar <- "popdens"
+    colorPal <- c("Reds", "Greens", "Blues")
+    tileVarIdxR <- tileVarIdx %% 3
+    
     numericValues <- unlist(c(data[, tileVar]), use.names = FALSE)
     if (tileVar == "subacc") {
-      pal <- colorFactor("YlOrRd", domain = varValues)
+      pal <- colorFactor(colorPal[tileVarIdxR + 1], domain = varValues)
     } else if (abs(skewness(as.numeric(as.character(varValues)), na.rm = T)) > 1) {
-      pal <- colorBin("YlOrRd", domain = varValues, n = 6)
+      pal <- colorBin(colorPal[tileVarIdxR + 1], domain = varValues, n = 6)
     } else {
-      pal <- colorQuantile("YlOrRd", domain = varValues, n = 6)
+      pal <- colorQuantile(colorPal[tileVarIdxR + 1], domain = varValues, n = 6)
     }
     
 
@@ -376,7 +437,7 @@ server <- function(input, output, session) {
           textsize = "15px",
           direction = "auto"),
         popup = tileVar,
-        group = paste0(tileVar, "G")
+        group = paste0("T_", varShortNames[tileVarIdx])
       ) 
     proxy <- proxy %>%
       clearControls() %>%
@@ -384,17 +445,18 @@ server <- function(input, output, session) {
         pal = pal,
         values = varValues,
         opacity = 0.7,
-        title = tileVar,
+        title = varShortNames[tileVarIdx],
         position = "bottomright",
-        group = paste0(tileVar, "G")
+        group = paste0("T_", varShortNames[tileVarIdx])
       )
     # 
-    # 
+    labelVarShortNames <- c()
     if (length(labelVars) > 0) {
       for (labelVar in labelVars) {
         labelVarIdx <- checkboxGroupListIndex[[labelVar]]
         pal2 <- colorBin(varColors[labelVarIdx], domain = mapData[, labelVar], bins = 6)
-        groupName <- paste0(labelVar, "G")
+        groupName <- varShortNames[labelVarIdx]
+        labelVarShortNames <- c(labelVarShortNames, groupName)
 
         proxy <- proxy %>%
           addCircles(
@@ -409,7 +471,7 @@ server <- function(input, output, session) {
           ) %>%
           addLegend(
             colors = varColors[labelVarIdx],
-            labels = paste0("<b>", labelVar, "</b>"),
+            labels = paste0("<b>", varShortNames[labelVarIdx], "</b>"),
             opacity = 0.7,
             title = NULL,
             position = "bottomright",
@@ -421,7 +483,7 @@ server <- function(input, output, session) {
       proxy <- proxy %>%
         addLayersControl(
           baseGroups = c("Grey map", "Standard map", "Dark map"),
-          overlayGroups = paste0(labelVars, "G"),
+          overlayGroups = labelVarShortNames,
           position = "topleft",
           options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
         )
