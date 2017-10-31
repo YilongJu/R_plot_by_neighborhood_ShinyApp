@@ -21,7 +21,7 @@ library(Hmisc)
 library(moments)
 library(colorspace)
 
-# author: "Brooke", "Yilong"
+# author: "Yilong", "Brooke"
 # date: [21 Sep, 2017]
 
 # [Function Declarations] ----
@@ -117,7 +117,7 @@ ct2000shp@data$id <- rownames(ct2000shp@data)
 f_ct2000shp <- fortify(ct2000shp , polyname = "BoroCT2000")
 ct2000shp_DF <- merge(f_ct2000shp, ct2000shp@data, by = "id")
 
-# [Prepare ny neighborhood shape data] ----
+# [Prepare ny neighborhood shape data, <by Brooke>] ----
 #   project the dataframe onto the shape file
 #   add to data a new column termed "id" composed of the rownames of data
 #   create a data.frame from our spatial object
@@ -187,7 +187,7 @@ ui <- fluidPage(
     "Contents",
     tabPanel(
      title = "ABM Census",
-     h3("Select the attributes and click Draw Plot to exhibit. (Wait for about 10s for plotting.)"),
+     h3("Select a variable to show on the tile and check others on the map. (Wait for about 10s for plotting.)"),
       # Sidebar layout with input and output definitions
       sidebarLayout(
         fluidRow(
@@ -202,7 +202,7 @@ ui <- fluidPage(
                         label = h4("Select which map to show"),
                         choices = shapeDataList),
             selectInput("ChooseTileVar",
-                        "Variables to show on the tile:",
+                        "Variable to show on the tile:",
                         unlist(checkboxGroupList)),
             verbatimTextOutput("displaySomething"),
             # radioButtons(inputId = "ChooseTileVarID2",
@@ -327,15 +327,10 @@ server <- function(input, output, session) {
   varDefOutput_r <- reactive({
     label <- "<h4>Variable Definitions</h4>"
     for (var in input$ChooseLabelVars) {
-      # cat(var, "\n")
       varId <- checkboxGroupListIndex[[var]]
-      # cat(varId, "\n")
       varSN <- varShortNames[varId]
-      # cat(varSN)
       varD <- varDefinitions[varId]
-      # cat(varD, "\n")
       label <- paste0(label, "<h5>", varSN, ":</h5>", varD, "<br/>")
-      # cat(label, "\n")
     }
     HTML(label)
   })
@@ -451,6 +446,7 @@ server <- function(input, output, session) {
       )
     # 
     labelVarShortNames <- c()
+    
     if (length(labelVars) > 0) {
       for (labelVar in labelVars) {
         labelVarIdx <- checkboxGroupListIndex[[labelVar]]
@@ -665,12 +661,6 @@ server <- function(input, output, session) {
   #   # Isolate the plot code, maintain the old plot until the button is clicked again
   #   # Make sure it closes when we exit this reactive, even if there's an error
   # })
-  
-  
-  
-  
-  
-  
 }
 
 shinyApp(ui = ui, server = server)
