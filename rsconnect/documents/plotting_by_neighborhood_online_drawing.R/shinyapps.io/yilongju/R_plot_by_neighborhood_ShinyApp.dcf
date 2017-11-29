@@ -5,8 +5,8 @@ account: yilongju
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 220289
-bundleId: 1044620
+bundleId: 1067331
 url: https://yilongju.shinyapps.io/R_plot_by_neighborhood_ShinyApp/
-when: 1508952175.25177
+when: 1510249340.83695
 asMultiple: FALSE
 asStatic: FALSE

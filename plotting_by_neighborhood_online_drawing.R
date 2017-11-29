@@ -28,6 +28,7 @@ library(colorspace)
 GetBinforVar <- function(data, varName, nbins = 6) {
   # data <- uCT
   # varName <- "subacc"
+  # varName <- "propoa"
   numericValues <- unlist(c(data[, varName]), use.names = FALSE)
   nbins_t = nbins
   l <- 0
@@ -47,6 +48,12 @@ GetRadius <- function(varValue, l = 2, u = 32) {
   varValue <- (varValue - range[1])/(range[2] - range[1]) * (u - l) + l
   return(varValue)
 }
+ShowColors <- function(col, border = "light gray", ...) {
+  n <- length(col)
+  plot(0, 0, type="n", xlim = c(0, 1), ylim = c(0, 1),
+       axes = FALSE, xlab = "", ylab = "")
+  rect(0:(n-1)/n, 0, 1:n/n, 1, col = col, border = border)
+}
 # Covert real number vector to percentage vector
 NumToPercentage <- function(numVec) {
   PercVec <- paste0(round(100 * numVec, 2), "%")
@@ -56,44 +63,45 @@ NumToPercentage <- function(numVec) {
 # [Read data] ----
 # setwd("/Users/yilongju/Dropbox/Study/GitHub/R_plot_by_neighborhood_ShinyApp")
 
-data <- read.csv("data/ABM_censustract_file.csv")
+data <- read.csv("data/ABM_censustract_precinct_111617.csv")
 names(data)[2] <- "BoroCT2000"
 data <- data[order(data$BoroCT2000),]
 data <- data[-1973, ]
+data_precinct <- data %>% select(precpop:offpcap)
 varDef <- read.csv("data/Variable_Definitions.csv")
 ct2000shp <- readOGR("data/nyct2000_12c/nyct2000_12c/nyct2000.shp")
 boros <- readOGR("data/nybb_16a/nybb.shp")
 ny.map <- readOGR("data/ZillowNeighborhoods-NY/ZillowNeighborhoods-NY.shp", layer="ZillowNeighborhoods-NY")
+nypp <- readOGR("data/nypp_17c_police_precinct_shapefile/nypp.shp")
 
 # Reproject ct data, to be consistent with ny neighbor data
 ct2000shp <- spTransform(ct2000shp, ny.map@proj4string)
+boros <- spTransform(boros, ny.map@proj4string)
+nypp <- spTransform(nypp, ny.map@proj4string)
 
 # [Desciption of attributes] ----
 beginRow <- 6
-varNames <- varDef$varName[beginRow:nrow(varDef) - 1]
+endCol <- 4
+varNames <- as.character(varDef$varName[beginRow:nrow(varDef) - 1])
 varShortNames <- as.character(varDef$varShortName[beginRow:nrow(varDef) - 1])
 showPercentage <- varDef$showPercentage[beginRow:nrow(varDef) - 1]
 varDefinitions <- varDef$varFullDefinition[beginRow:nrow(varDef) - 1]
 checkboxGroupListIndex <- setNames(as.list(c(1:length(varNames))), varNames)
 checkboxGroupList <- setNames(as.list(as.character(varNames)), as.character(varShortNames))
 shapeDataList <- setNames(as.list(c("CT", "NB")), c("Census Tract Map", "Neighborhood Map"))
-
-ShowColors <- function(col, border = "light gray", ...) {
-      n <- length(col)
-      plot(0, 0, type="n", xlim = c(0, 1), ylim = c(0, 1),
-           axes = FALSE, xlab = "", ylab = "")
-      rect(0:(n-1)/n, 0, 1:n/n, 1, col = col, border = border)
-   }
-
-varColors <- rainbow_hcl(length(varNames), c = 150, l = 60)
-ShowColors(varColors)
-# 
+varColors <- rainbow_hcl(length(varNames), c = 190, l = 60, start = 12, end = 300)
+# ShowColors(varColors)
 # varColors <- terrain.colors(length(varNames))
 # varColors <- cm.colors(length(varNames))
 # varColors <- rainbow_hcl(length(varNames), start = 60, end = 240)
 # varColors <- diverge_hcl(length(varNames),
 #                          h = c(800, 300), c = 100, l = c(20, 130), power = 0.4)
 # ShowColors(varColors)
+
+# [Prepare precinct shape data] ----
+nypp@data$id <- rownames(nypp@data)
+f_nypp <- fortify(nypp, polyname = "Precinct")
+nypp_DF <- merge(f_nypp, nypp@data, by = "id")
 
 # [Prepare Boros shape data] ----
 #   add to data a new column termed "id" composed of the rownames of data
@@ -105,7 +113,7 @@ boros@data$id <- rownames(boros@data)
 f_boros <- fortify(boros, polyname = "BoroCode")
 boros_DF <- merge(f_boros, boros@data, by = "id")
 bnames <- aggregate(data = boros_DF, cbind(long,lat) ~ BoroName, FUN=function(x) mean(range(x)))
-bnames[4,3] <- 200741.5
+# bnames[4,3] <- 200741.5
 bnames$BoroName <- as.character(bnames$BoroName)
 bnames$BoroName <- as.factor(bnames$BoroName)
 
@@ -114,7 +122,7 @@ bnames$BoroName <- as.factor(bnames$BoroName)
 #   create a data.frame from our spatial object
 #   merge the "fortified" data with the data from our spatial object
 ct2000shp@data$id <- rownames(ct2000shp@data)
-f_ct2000shp <- fortify(ct2000shp , polyname = "BoroCT2000")
+f_ct2000shp <- fortify(ct2000shp, polyname = "BoroCT2000")
 ct2000shp_DF <- merge(f_ct2000shp, ct2000shp@data, by = "id")
 
 # [Prepare ny neighborhood shape data, <by Brooke>] ----
@@ -127,7 +135,7 @@ dat <- data.frame(Longitude = data$ctrdlong, Latitude = data$ctrdlat)
 coordinates(dat) <- ~ Longitude + Latitude
 proj4string(dat) <- proj4string(sodo)
 location = over(dat, sodo)
-data = cbind(data,location)
+data = cbind(data, location)
 dataProjected <- sodo
 dataProjected@data$id <- rownames(dataProjected@data)
 watershedPoints <- fortify(dataProjected, region = "id")
@@ -177,6 +185,118 @@ NBname_CTntaname <- aggregate(NTANAme ~ Name, data = NBname_CTntaname,
                               FUN = paste0, collapse = "<br/>")
 
 ny.map_attr@data <- left_join(ny.map_attr@data, NBname_CTntaname, by = "Name")
+
+# --- For Boro
+data_necessary_Boro <- cbind(data_necessary, borocodenum = data$borocodenum)
+tbl_df(data_necessary_Boro)
+data_necessary_Boro[is.na(data_necessary_Boro)] <- 0
+uBR <- data_necessary_Boro %>%
+  group_by(borocodenum) %>%
+  summarise_all(funs(mean))
+head(uBR)
+
+dfBR <- dplyr::left_join(boros_DF, uBR, by = c("BoroCode" = "borocodenum"))
+#   --- Combine shapefile with data
+boros_attr <- boros
+boros_attr@data <- dplyr::left_join(boros_attr@data, uBR, by = c("BoroCode" = "borocodenum"))
+
+# --- For Precinct
+data_precinct[is.na(data_precinct)]
+
+uPP <- data_precinct %>%
+  group_by(precinct) %>%
+  summarise_all(funs(mean))
+head(uPP)
+
+dfPP <- dplyr::left_join(nypp_DF, uPP, by = c("Precinct" = "precinct"))
+#   --- Combine shapefile with data
+nypp_attr <- nypp
+nypp_attr@data <- dplyr::left_join(nypp_attr@data, uPP, by = c("Precinct" = "precinct"))
+
+
+
+# [Test leaflet] ----
+# ny.map_attr
+# ct2000shp_attr
+# colfunc <- colorRampPalette(c("white", "green"))
+varValues <- nypp_attr$offpcap
+labels <- sprintf("<strong>%s</strong><br/><b><u>offpcap</u></b> %g<br/>",
+                  nypp_attr@data$Precinct, signif(varValues, 4))
+labels <- lapply(labels, HTML)
+intervals <- c(0.01, 0.02, 0.03, 0.04, 0.06, 0.08, 0.10, 0.1, 1)
+
+GetColorPalByBins <- function(varValues, intervals, color1, color2 = "white") {
+
+  pal <- function(varValues) {
+    intervals <- sort(intervals)
+    colfunc <- colorRampPalette(c(color2, color1))
+    colors <- colfunc(length(intervals) + 1)
+    
+    colorDeter <- data.frame(sapply(intervals, function(x) {
+      x < varValues
+    }))
+    
+    varColorIdx <- apply(colorDeter, 1, sum) + 1
+    varColors <- colors[varColorIdx]
+    varColors[is.na(varColors)] <- "#000000"
+    return(varColors)
+  }
+  return(pal)
+}
+
+pal <- GetColorPalByBins(varValues, intervals, "blue")
+pal(varValues)
+pal <- colorQuantile(colfunc(6), domain = varValues, n = 6)
+pal(varValues)
+
+map <- leaflet(ny.map_attr) %>% 
+  setView(-73.91271, 40.69984, 11) %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
+  addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
+  addLayersControl(
+    baseGroups = c("Grey map", "Standard map", "Dark map"),
+    position = "topleft",
+    options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
+  ) %>%
+  # addPolygons(weight = 4, color = "red") %>%
+  # addPolygons(data = ct2000shp_attr, weight = 4, color = "blue") %>%
+  # addPolygons(data = boros_attr, weight = 4, color = "black") %>%
+  addPolygons(
+    data = nypp_attr,
+    fillColor = pal(varValues),
+    weight = 1,
+    opacity = 1,
+    color = "green",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    highlight = highlightOptions(
+      weight = 3,
+      color = "#666",
+      dashArray = "",
+      fillOpacity = 0.7,
+      bringToFront = F),
+    label = labels,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal",
+                   padding = "3px 8px"),
+      textsize = "15px",
+      direction = "auto"),
+    # popup = tileVar,
+    group = "offpcap"
+    )
+# %>%
+#   addLegend(
+#     pal = pal,
+#     values = varValues,
+#     opacity = 0.7,
+#     title = "offpcap",
+#     position = "bottomright",
+#     group = "offpcap"
+#   )
+
+map
+
 
 
 # [Define server ui] ----
@@ -259,6 +379,8 @@ ui <- fluidPage(
 # [Define server logic] ----
 server <- function(input, output, session) {
   
+  cat("000000")
+  # A test plot for other usage
   output$distPlot <- renderPlot({
     x    <- faithful$waiting
     bins <- seq(min(x), max(x), length.out = input$bins + 1)
@@ -267,14 +389,8 @@ server <- function(input, output, session) {
          main = "Histogram of waiting times")
   })
   
-  # # Set up a variable to control the drawing
-  # v <- reactiveValues(doPlot = FALSE)
-  # # Detect whether the button is clicked
-  # observeEvent(input$Plot, {
-  #   v$doPlot <- input$Plot
-  # })
-  
-  
+  # Create reactive variables that will reactive to user input (Select CT / NB)
+  #   Variable shown on tile
   tileVar_r <- reactive({input$ChooseTileVar})
   map_r <- reactive({
     if (input$ChooseShapefileID == "CT") {
@@ -283,6 +399,7 @@ server <- function(input, output, session) {
       return(ny.map_attr)
     }
   })
+  #   Label of shapedata
   mapDataDisplayLabel_r <- reactive({
     if (input$ChooseShapefileID == "CT") {
       return(ct2000shp_attr$NTANAme)
@@ -290,6 +407,7 @@ server <- function(input, output, session) {
       return(ny.map_attr$Name)
     }
   })
+  #   Useful data for tile
   utilData_r <- reactive({
     if (input$ChooseShapefileID == "CT") {
       return(uCT)
@@ -297,6 +415,7 @@ server <- function(input, output, session) {
       return(uNB)
     }
   })
+  #   Set range of radius of circles
   radiusRange_r <- reactive({
     if (input$ChooseShapefileID == "CT") {
       return(c(1,12))
@@ -304,6 +423,7 @@ server <- function(input, output, session) {
       return(c(2,32))
     }
   })
+  #   Whether show CT names in hoverinfo
   CTNames_r <- reactive({
     if (input$ChooseShapefileID == "CT") {
       return(FALSE)
@@ -311,19 +431,7 @@ server <- function(input, output, session) {
       return(TRUE)
     }
   })
-
-  # output$displaySomething <- renderPrint({
-  #   paste(input$ChooseTileVar,
-  #         checkboxGroupListIndex[[input$ChooseTileVar]],
-  #         showPercentage[checkboxGroupListIndex[[input$ChooseTileVar]]],
-  #         sep = ", "
-  #   )
-  # })
-  
-  # output$displaySomething2 <- renderPrint({
-  #   input$ChooseLabelVars
-  # })
-  
+  # Generate variable definitions
   varDefOutput_r <- reactive({
     label <- "<h4>Variable Definitions</h4>"
     for (var in input$ChooseLabelVars) {
@@ -335,10 +443,12 @@ server <- function(input, output, session) {
     HTML(label)
   })
   
+  # Show variable definitions
   output$varDefOutput <- renderUI({
     varDefOutput_r()
   })
   
+  # Show leaflet base map
   output$outputMap <- renderLeaflet({
       map <- leaflet(map_r()) %>% 
       setView(-73.91271, 40.69984, 11) %>%
@@ -352,66 +462,87 @@ server <- function(input, output, session) {
       )
     })
   
+  # Observe command from map control, hide / show layers
   observe({
+    # Initialize map components
     map <- map_r()
+    # map <- ct2000shp_attr
     mapData <- map@data
     mapDataDisplayLabel <- mapDataDisplayLabel_r()
     utilData <- utilData_r()
     radiusRange <- radiusRange_r()
     CTNames <- CTNames_r()
     
+    cat("111111")
+    
     tileVar <- input$ChooseTileVar
-    # labelVars <- input$ChooseLabelVars
+    # tileVar <- "subdens"
+    # tileVar <- "subacc"
+    # tileVar <- "popdens"
     restVars <- varNames[varNames != tileVar]
     labelVars <- restVars
     tileVarIdx <- checkboxGroupListIndex[[tileVar]]
     
+    cat("aaaaaaaa")
     if(showPercentage[tileVarIdx] == 1) {
+      cat("a11")
       varValues <- mapData[, tileVar]*100
+      cat("a12")
       labels <- sprintf("<h3><strong>%s</strong></h3><br/><b><u>%s:</u></b> %g%%<br/>",
                         mapDataDisplayLabel, varShortNames[tileVarIdx], signif(varValues, 4))
+      cat("a13")
     } else {
+      cat("a21")
       varValues <- mapData[, tileVar]
+      cat("a22")
       labels <- sprintf("<strong>%s</strong><br/><b><u>%s:</u></b> %g<br/>",
                         mapDataDisplayLabel, varShortNames[tileVarIdx], signif(varValues, 4))
+      cat("a23")
     }
+    cat("bbbbbb")
     for (labelVar in labelVars) {
+      # labelVar <- labelVars[1]
+      cat("b1")
       labelVarIdx <- checkboxGroupListIndex[[labelVar]]
+      cat("b2")
       if(showPercentage[labelVarIdx] == 1) {
+        cat("b31")
         labels <- paste0(labels, "<b>", varShortNames[labelVarIdx], ":</b> ",
                          signif(100*mapData[, labelVar], 4), "%<br/>")
       } else {
+        cat("b32")
         labels <- paste0(labels, "<b>", varShortNames[labelVarIdx], ":</b> ",
                          signif(mapData[, labelVar], 4), "<br/>")
       }
     }
+    cat("cccccc")
     if (CTNames) {
       labels <- paste0(labels, "<strong>CTs:</strong><br/>", mapData$NTANAme)
     }
     
+    cat("22222")
     labels <- lapply(labels, HTML)
-
-    proxy <- leafletProxy("outputMap", data = map)
-      
-    # tileVar <- "subdens"
-    # tileVar <- "subacc"
-    # tileVar <- "popdens"
     colorPal <- c("Reds", "Greens", "Blues")
     tileVarIdxR <- tileVarIdx %% 3
-    
-    numericValues <- unlist(c(data[, tileVar]), use.names = FALSE)
-    if (tileVar == "subacc") {
-      pal <- colorFactor(colorPal[tileVarIdxR + 1], domain = varValues)
-    } else if (abs(skewness(as.numeric(as.character(varValues)), na.rm = T)) > 1) {
-      pal <- colorBin(colorPal[tileVarIdxR + 1], domain = varValues, n = 6)
+    colfunc <- colorRampPalette(c("white", varColors[tileVarIdx]))
+    colfunc(6)
+    # if (tileVar == "subacc") {
+    if (0) {
+      pal <- colorFactor(colfunc(6), domain = varValues)
+    } else if (abs(skewness(as.numeric(as.character(varValues)), na.rm = T)) > 1 | tileVar == "subacc") {
+      pal <- colorBin(colfunc(6), domain = varValues, n = 6)
     } else {
-      pal <- colorQuantile(colorPal[tileVarIdxR + 1], domain = varValues, n = 6)
+      pal <- colorQuantile(colfunc(6), domain = varValues, n = 6)
     }
     
+    # Create a proxy for Leaflet map, saving render time
+    proxy <- leafletProxy("outputMap", data = map)
 
+    # Generate Leaflet map layers
     proxy <- proxy %>%
       clearShapes() %>%
       addPolygons(weight = 4, color = "while") %>%
+      # Add tile layer
       addPolygons(
         fillColor = pal(varValues),
         weight = 1,
@@ -431,11 +562,12 @@ server <- function(input, output, session) {
                        padding = "3px 8px"),
           textsize = "15px",
           direction = "auto"),
-        popup = tileVar,
+        # popup = tileVar,
         group = paste0("T_", varShortNames[tileVarIdx])
       ) 
     proxy <- proxy %>%
       clearControls() %>%
+      # Add corresponding legend
       addLegend(
         pal = pal,
         values = varValues,
@@ -444,10 +576,12 @@ server <- function(input, output, session) {
         position = "bottomright",
         group = paste0("T_", varShortNames[tileVarIdx])
       )
-    # 
+    
+    # Add all other variables to be shown as circles
     labelVarShortNames <- c()
     
     if (length(labelVars) > 0) {
+      groupNameList <- c(NULL)
       for (labelVar in labelVars) {
         labelVarIdx <- checkboxGroupListIndex[[labelVar]]
         pal2 <- colorBin(varColors[labelVarIdx], domain = mapData[, labelVar], bins = 6)
@@ -455,16 +589,6 @@ server <- function(input, output, session) {
         labelVarShortNames <- c(labelVarShortNames, groupName)
 
         proxy <- proxy %>%
-          addCircles(
-            lng = ~ctrdlong, lat = ~ctrdlat,
-            weight = GetRadius(mapData[, labelVar],
-                               radiusRange[1], radiusRange[2]),
-            # fill = pal2(mapData[, labelVar]),
-            fill = FALSE,
-            color = varColors[labelVarIdx],
-            stroke = T, fillOpacity = 0.6, opacity = 0.6,
-            group = groupName
-          ) %>%
           addLegend(
             colors = varColors[labelVarIdx],
             labels = paste0("<b>", varShortNames[labelVarIdx], "</b>"),
@@ -473,9 +597,21 @@ server <- function(input, output, session) {
             position = "bottomright",
             group = groupName
           ) %>%
-          hideGroup(groupName)
+          hideGroup(groupName) %>%
+          addCircles(
+            lng = ~ctrdlong, lat = ~ctrdlat,
+            weight = GetRadius(mapData[, labelVar],
+                               radiusRange[1], radiusRange[2]),
+            fill = FALSE,
+            color = varColors[labelVarIdx],
+            stroke = T, fillOpacity = 0.6, opacity = 0.6,
+            group = groupName
+          )
+          
+        groupNameList <- c(groupNameList, groupName)
       }
       
+      # Add map control
       proxy <- proxy %>%
         addLayersControl(
           baseGroups = c("Grey map", "Standard map", "Dark map"),
@@ -488,6 +624,14 @@ server <- function(input, output, session) {
     proxy
   })
   
+  # # Set up a variable to control the drawing [For buttons]
+  # v <- reactiveValues(doPlot = FALSE)
+  # # Detect whether the button is clicked
+  # observeEvent(input$Plot, {
+  #   v$doPlot <- input$Plot
+  # })
+
+  # Use for buttons and progress bars
   # plotGIS_r <- reactive({
   #   # # If the button is not clicked, do not draw
   #   # if (v$doPlot == FALSE) {
@@ -497,170 +641,27 @@ server <- function(input, output, session) {
   #   # progress <- shiny::Progress$new()
   #   # Initialize the progressbar
   #   # progress$set(message = "Plotting...", value = 0)
-  #   shapefile <- input$ChooseShapefileID
-  #   tileVar <- tileVar_r()
-  #   
-  #   if (shapefile == "CT") {
   #     # progress$inc(1/5, detail = "Initializing...")
-  #     labels <- sprintf(
-  #       "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
-  #       ct2000shp_attr$NTANAme,
-  #       round(ct2000shp_attr[, tileVar]),
-  #       round(ct2000shp_attr$povrate*100, 2)
-  #     ) %>% lapply(htmltools::HTML)
-  #     
-  #     bins <- GetBinforVar(uCT, tileVar)
-  #     pal <- colorBin("YlOrRd", domain = uCT[ ,tileVar], bins = bins)
-  #     
-  #     bins2 <- GetBinforVar(uCT, "povrate")
-  #     pal2 <- colorBin("blue", domain = uCT$povrate, bins = bins)
-  #     
   #     # progress$inc(1/5, detail = "Adding tiles...")
-  #     map2 <- leaflet(ct2000shp_attr) %>% 
-  #       setView(-73.91271, 40.69984, 11) %>%
-  #       addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
-  #       addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
-  #       addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map")
-  #     
   #     # progress$inc(1/5, detail = "Showing variables...")
-  #     map2 <- map2 %>%
-  #       addPolygons(weight = 4, color = "while") %>%
-  #       addPolygons(
-  #         fillColor = ~pal(popdens),
-  #         weight = 1,
-  #         opacity = 1,
-  #         color = "white",
-  #         dashArray = "3",
-  #         fillOpacity = 0.7,
-  #         highlight = highlightOptions(
-  #           weight = 3,
-  #           color = "#666",
-  #           dashArray = "",
-  #           fillOpacity = 0.7,
-  #           bringToFront = F),
-  #         label = labels,
-  #         labelOptions = labelOptions(
-  #           style = list("font-weight" = "normal",
-  #                        padding = "3px 8px"),
-  #           textsize = "15px",
-  #           direction = "auto"),
-  #         popup = "Hi",
-  #         group = "POPDENS"
-  #       )
-  #     
   #     # progress$inc(1/5, detail = "Showing more variables...")
-  #     map2 <- map2 %>%
-  #       addCircles(
-  #         lng = ~ctrdlong, lat = ~ctrdlat,
-  #         weight = GetRadius(ct2000shp_attr@data, "povrate", 1, 8),
-  #         fill = ~pal2(povrate),
-  #         stroke = T, fillOpacity = 0.6, opacity = 0.6,
-  #         group = "PORVRATE"
-  #       )
-  #     
   #     # progress$inc(1/5, detail = "Adding legends...")
-  #     map2 <- map2 %>%
-  #       addLegend(
-  #         pal = pal,
-  #         values = ~popdens,
-  #         opacity = 0.7,
-  #         title = "Popdens",
-  #         position = "bottomright",
-  #         group = "POPDENS"
-  #       ) %>%
-  #       addLegend(
-  #         colors = "blue",
-  #         labels = "<b>Povrate</b>",
-  #         values = ~povrate,
-  #         opacity = 0.7,
-  #         title = NULL,
-  #         position = "bottomright",
-  #         group = "PORVRATE"
-  #       ) %>%
-  #       addLayersControl(
-  #         baseGroups = c("Grey map", "Standard map", "Dark map"),
-  #         overlayGroups = c("POPDENS", "PORVRATE"),
-  #         options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
-  #       )
-  #     map2
-  #   }
-  #   else if (shapefile == "NB") {
-  #     bins <- GetBinforVar(dfNB, "popdens")
-  #     pal <- colorBin("YlOrRd", domain = dfNB$popdens, bins = bins)
-  #     
-  #     bins2 <- GetBinforVar(dfNB, "povrate")
-  #     pal2 <- colorBin("blue", domain = dfNB$povrate, bins = bins)
-  #     
-  #     labels <- sprintf(
-  #       "<strong>%s</strong><br/><b>popdens:</b> %g people / mi<sup>2</sup><br/><b>povrate:</b> %g%%",
-  #       ny.map_attr$Name,
-  #       round(ny.map_attr$popdens),
-  #       round(ny.map_attr$povrate*100, 2)
-  #     ) %>% lapply(htmltools::HTML)
-  #     
-  #     map <- leaflet(ny.map_attr) %>% 
-  #       setView(-73.92194, 40.68922, 11) %>%
-  #       addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Grey map") %>%
-  #       addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Standard map") %>%
-  #       addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark map") %>%
-  #       addPolygons(weight = 4, color = "while") %>%
-  #       addPolygons(
-  #         fillColor = ~pal(popdens),
-  #         weight = 2,
-  #         opacity = 1,
-  #         color = "white",
-  #         dashArray = "3",
-  #         fillOpacity = 0.7,
-  #         highlight = highlightOptions(
-  #           weight = 5,
-  #           color = "#666",
-  #           dashArray = "",
-  #           fillOpacity = 0.7,
-  #           bringToFront = F),
-  #         label = labels,
-  #         labelOptions = labelOptions(
-  #           style = list("font-weight" = "normal",
-  #                        padding = "3px 8px"),
-  #           textsize = "15px",
-  #           direction = "auto"),
-  #         popup = "Hi",
-  #         group = "POPDENS"
-  #       ) %>%
-  #       addLegend(
-  #         pal = pal,
-  #         values = ~popdens,
-  #         opacity = 0.7,
-  #         title = "Popdens",
-  #         position = "bottomright",
-  #         group = "POPDENS"
-  #       ) %>%
-  #       addLegend(
-  #         colors = "blue",
-  #         labels = "<b>Povrate</b>",
-  #         values = ~povrate,
-  #         opacity = 0.7,
-  #         title = NULL,
-  #         position = "bottomright",
-  #         group = "PORVRATE"
-  #       ) %>%
-  #       addCircles(
-  #         lng = ~ctrdlong, lat = ~ctrdlat,
-  #         weight = GetRadius(ny.map_attr@data, "povrate"),
-  #         fill = ~pal2(povrate),
-  #         stroke = T, fillOpacity = 0.8, opacity = 0.7,
-  #         group = "PORVRATE"
-  #       ) %>%
-  #       addLayersControl(
-  #         baseGroups = c("Grey map", "Standard map", "Dark map"),
-  #         overlayGroups = c("POPDENS", "PORVRATE"),
-  #         options = layersControlOptions(autoZIndex = TRUE, collapsed = FALSE)
-  #       )
-  #     map
-  #   }
   #   # on.exit(progress$close())
   #   # Isolate the plot code, maintain the old plot until the button is clicked again
   #   # Make sure it closes when we exit this reactive, even if there's an error
   # })
+  
+  # # For debug
+  # output$displaySomething <- renderPrint({
+  #   paste(input$ChooseTileVar,
+  #         checkboxGroupListIndex[[input$ChooseTileVar]],
+  #         showPercentage[checkboxGroupListIndex[[input$ChooseTileVar]]],
+  #         sep = ", "
+  #   )
+  # })
+  # output$displaySomething2 <- renderPrint({
+  #   input$ChooseLabelVars
+  # })
 }
-
+# [Run server] ----
 shinyApp(ui = ui, server = server)
